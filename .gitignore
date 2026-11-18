@@ -1,0 +1,19 @@
+# 构建产物
+build/
+bin/
+obj/
+.vs/
+*.user
+
+# 用户配置（含个人目录、手机号、邮箱）
+PiaoMate.config
+
+# 内部版内置公司信息（只提交示例）
+internal/*
+!internal/companies.example.txt
+
+# 真实发票样例不提交（测试使用运行时生成的虚构发票）
+mock/*
+!mock/README.md
+*.pdf
+*.ofd

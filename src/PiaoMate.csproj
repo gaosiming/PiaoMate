@@ -1,0 +1,53 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>PiaoMate</AssemblyName>
+    <Version>1.0.0</Version>
+    <Product>票小秘</Product>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <DebugType>none</DebugType>
+    <Optimize>true</Optimize>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <WebView2Version>1.0.2903.40</WebView2Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="$(WebView2Version)" />
+    <PackageReference Include="PdfPig" Version="0.1.9" />
+    <PackageReference Include="ZXing.Net" Version="0.16.11" />
+    <Reference Include="Microsoft.VisualBasic" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+  <!-- 版本：Public（默认，开源发布，不含任何公司信息）/ Internal（内置 internal\companies.txt 中的备选公司） -->
+  <PropertyGroup>
+    <Edition Condition="'$(Edition)' == ''">Public</Edition>
+    <InternalCompanies>$(MSBuildThisFileDirectory)..\internal\companies.txt</InternalCompanies>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Edition)' == 'Internal'">
+    <EmbeddedResource Include="$(InternalCompanies)" LogicalName="builtin.companies.txt" />
+  </ItemGroup>
+  <Target Name="CheckEdition" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(Edition)' != 'Public' And '$(Edition)' != 'Internal'" Text="Edition 只能是 Public 或 Internal（当前：$(Edition)）" />
+    <Error Condition="'$(Edition)' == 'Internal' And !Exists('$(InternalCompanies)')" Text="内部版需要 internal\companies.txt（每行：公司名称|税号），可参照 internal\companies.example.txt 创建" />
+  </Target>
+  <ItemGroup>
+    <!-- 更新日志：软件内「更新日志」窗口显示 -->
+    <EmbeddedResource Include="..\CHANGELOG.md" LogicalName="CHANGELOG.md" />
+  </ItemGroup>
+  <!-- 把依赖 DLL 嵌入 exe，实现单文件便携 -->
+  <Target Name="EmbedDeps" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <EmbeddedResource Include="@(ReferenceCopyLocalPaths)" Condition="'%(Extension)' == '.dll' And '%(Filename)' != 'UglyToad.PdfPig.DocumentLayoutAnalysis' And '%(Filename)' != 'UglyToad.PdfPig.Package' And '%(Filename)' != 'zxing.presentation' And '%(Filename)' != 'Microsoft.Web.WebView2.Wpf' And '%(Filename)' != 'WebView2Loader'" LogicalName="lib.%(Filename).dll" />
+      <!-- WebView2 原生加载器：按进程架构在运行时释放（见 IssueForm.EnsureLoader） -->
+      <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.web.webview2/$(WebView2Version)/runtimes/win-x64/native/WebView2Loader.dll" LogicalName="native.x64.WebView2Loader.dll" />
+      <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.web.webview2/$(WebView2Version)/runtimes/win-x86/native/WebView2Loader.dll" LogicalName="native.x86.WebView2Loader.dll" />
+      <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.web.webview2/$(WebView2Version)/runtimes/win-arm64/native/WebView2Loader.dll" LogicalName="native.arm64.WebView2Loader.dll" />
+    </ItemGroup>
+  </Target>
+</Project>

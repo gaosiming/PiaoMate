@@ -1,0 +1,41 @@
+name: 问题反馈
+description: 软件出错、识别不对、功能不符合预期
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！**发票含有个人和公司信息，请不要上传真实发票 PDF、截图中的税号/金额/发票号，也不要贴出完整的发票链接。**
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本
+      description: 标题栏上显示的版本号，例如「票小秘 v1.0.0」
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及功能
+      options:
+        - 凑金额导出
+        - 发票识别（解析 PDF）
+        - 整理发票
+        - 下载发票
+        - 扫码开票（自动填写）
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 操作步骤、看到的现象、期望的结果。界面上的状态/提示文字可以直接复制过来。
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: 运行环境
+      description: Windows 版本；扫码开票问题请注明 WebView2 是否已安装
+      placeholder: Windows 11 23H2

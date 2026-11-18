@@ -1,0 +1,42 @@
+name: 开票平台适配请求
+description: 某个开票平台的链接/二维码无法自动下载 PDF，希望适配
+labels: [platform]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **⚠️ 发票链接本身就能打开你的发票（含抬头、税号、金额等），请勿在这里贴出完整链接。**
+        只需提供平台名称、域名和链接的大致形式（把参数部分替换成 `***`），开发者会通过其他方式联系你获取样例。
+  - type: input
+    id: platform
+    attributes:
+      label: 平台名称
+      placeholder: 例如：某某发票平台
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: 链接形式（参数请打码）
+      placeholder: https://fp.example.com/invoice/view?id=***
+    validations:
+      required: true
+  - type: textarea
+    id: message
+    attributes:
+      label: 软件给出的提示
+      description: 下载列表中该行的状态与提示文字（鼠标悬停可看到完整内容）
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 链接打开后是
+      options:
+        - 已开好的发票（可查看/下载）
+        - 开票申请页（需要填写抬头、税号等）
+        - 不确定
+  - type: checkboxes
+    id: sample
+    attributes:
+      label: 样例
+      options:
+        - label: 我可以私下提供一个不介意他人查看的样例链接，用于调试

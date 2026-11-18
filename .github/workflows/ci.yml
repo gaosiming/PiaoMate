@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 构建（公开版）
+        run: dotnet build src -c Release -o build\out --nologo
+
+      - name: 测试
+        shell: pwsh
+        run: |
+          $fonts = Join-Path $env:WINDIR 'Fonts'
+          if ((Test-Path (Join-Path $fonts 'Deng.ttf')) -or (Test-Path (Join-Path $fonts 'simhei.ttf'))) {
+            dotnet run --project tests\PiaoMate.Tests
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            Write-Output "::warning::运行环境缺少中文字体 Deng.ttf / simhei.ttf，无法生成测试用虚构发票，已跳过测试。"
+          }
