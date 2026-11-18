@@ -3,31 +3,101 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # 测试用中文字体：霞鹜文楷（SIL OFL 1.1），运行环境没有 Deng.ttf / simhei.ttf 时用它生成虚构发票
+  TEST_FONT_URL: https://github.com/lxgw/LxgwWenKai/releases/download/v1.530/LXGWWenKai-Regular.ttf
+  TEST_FONT_SHA256: 2d73eea94ad808999d90c0000c239a84a33b09d4bc6ab6c5b8bbf1eda8a7fc8b
 
 jobs:
   build-test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
-      - name: 构建（公开版）
-        run: dotnet build src -c Release -o build\out --nologo
+      - name: 准备测试字体
+        shell: pwsh
+        run: |
+          $font = Join-Path $env:RUNNER_TEMP 'LXGWWenKai-Regular.ttf'
+          Invoke-WebRequest $env:TEST_FONT_URL -OutFile $font
+          $hash = (Get-FileHash $font -Algorithm SHA256).Hash
+          if ($hash -ne $env:TEST_FONT_SHA256) { throw "测试字体校验失败：$hash" }
+          "PIAOMATE_TEST_FONT=$font" >> $env:GITHUB_ENV
 
       - name: 测试
         shell: pwsh
         run: |
-          $fonts = Join-Path $env:WINDIR 'Fonts'
-          if ((Test-Path (Join-Path $fonts 'Deng.ttf')) -or (Test-Path (Join-Path $fonts 'simhei.ttf'))) {
-            dotnet run --project tests\PiaoMate.Tests
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } else {
-            Write-Output "::warning::运行环境缺少中文字体 Deng.ttf / simhei.ttf，无法生成测试用虚构发票，已跳过测试。"
-          }
+          dotnet run --project tests\PiaoMate.Tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 生成发布包（公开版）
+        id: pack
+        shell: pwsh
+        run: |
+          .\tools\release.ps1 -Rebuild -Edition Public -SkipTests
+          $ver = ([xml](Get-Content src\PiaoMate.csproj -Raw)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          $sha = "${{ github.sha }}".Substring(0, 7)
+          "dir=build/dist/PiaoMate-v$ver" >> $env:GITHUB_OUTPUT
+          "name=PiaoMate-v$ver-$sha" >> $env:GITHUB_OUTPUT
+
+      # 物料：exe + 使用说明 + 快速使用手册 + 更新日志 + 许可证（与 Release 的公开版 zip 内容一致）
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.pack.outputs.name }}
+          path: ${{ steps.pack.outputs.dir }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 校验标签与版本号一致（推送标签时）
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $dir = "${{ steps.pack.outputs.dir }}"
+          if ("$(Split-Path $dir -Leaf)" -ne "PiaoMate-${{ github.ref_name }}") { throw "标签 ${{ github.ref_name }} 与 csproj 版本号不一致：$dir" }
+
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: release-zip
+          path: ${{ steps.pack.outputs.dir }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # 推送 v* 标签：把公开版 zip 发布到对应的 GitHub Release（已存在则覆盖同名附件）
+  release:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-zip
+          path: dist
+
+      - name: 发布 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ver="${TAG#v}"
+          # 更新日志中本版本的小节作为发布说明
+          awk -v v="## [$ver]" 'index($0, v) == 1 { on = 1; next } on && /^## \[/ { exit } on' CHANGELOG.md | sed 's/\r$//' > notes.md
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.zip --clobber
+          else
+            gh release create "$TAG" dist/*.zip --title "票小秘 PiaoMate $TAG" --notes-file notes.md --verify-tag
+          fi

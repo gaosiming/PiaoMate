@@ -33,7 +33,7 @@ dotnet build src -c Release -o build\out          # 生成 build\out\PiaoMate.ex
 dotnet run --project tests\PiaoMate.Tests    # 运行测试
 ```
 
-测试使用运行时生成的**虚构发票**（需要系统字体「等线」Deng.ttf 或「黑体」simhei.ttf），不依赖任何真实发票。
+测试使用运行时生成的**虚构发票**（需要系统字体「等线」Deng.ttf 或「黑体」simhei.ttf；没有时可用环境变量 `PIAOMATE_TEST_FONT` 指定任意中文 `.ttf`，如开源的[霞鹜文楷](https://github.com/lxgw/LxgwWenKai)），不依赖任何真实发票。
 
 ## 公开版与内部版
 
@@ -54,6 +54,8 @@ dotnet run --project tests\PiaoMate.Tests    # 运行测试
 ```
 
 脚本会升版本号、写入更新日志、运行测试、编译并打包到 `build\dist\`。
+
+CI（GitHub Actions）每次推送都会构建并运行测试，公开版发布包（exe + 文档）作为构建物料保存 30 天，可在 Actions 运行页面下载。推送 `v*` 标签（如 `git push origin v1.0.1`）时，CI 会把公开版 zip 发布到对应的 Release；标签须与 csproj 版本号一致。
 
 ## 参与贡献
 

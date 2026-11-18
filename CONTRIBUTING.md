@@ -16,7 +16,7 @@
 
 - Windows 10/11
 - [.NET SDK](https://dotnet.microsoft.com/download) 6.0 或更高（目标框架 .NET Framework 4.8）
-- 测试需要系统字体「等线」`Deng.ttf` 或「黑体」`simhei.ttf`（用于运行时生成虚构发票 PDF）
+- 测试需要系统字体「等线」`Deng.ttf` 或「黑体」`simhei.ttf`（用于运行时生成虚构发票 PDF）；没有时用环境变量 `PIAOMATE_TEST_FONT` 指定任意中文 `.ttf`
 
 ```powershell
 dotnet build src -c Release -o build\out          # 构建，得到 build\out\PiaoMate.exe

@@ -6,7 +6,7 @@ using UglyToad.PdfPig.Writer;
 
 /// <summary>
 /// 生成虚构的全电发票 PDF（版式与真实发票的关键文字位置一致），供测试使用，避免仓库中出现真实发票。
-/// 使用系统自带中文字体（等线 Deng.ttf，退回黑体 simhei.ttf）。
+/// 使用系统自带中文字体（等线 Deng.ttf，退回黑体 simhei.ttf），或环境变量 PIAOMATE_TEST_FONT 指定的 .ttf。
 /// </summary>
 class SampleInvoice
 {
@@ -16,22 +16,31 @@ class SampleInvoice
 
     static readonly string[] Fonts = { "Deng.ttf", "simhei.ttf" };
 
-    /// <summary>可用的中文 TrueType 字体；没有时返回 null（相关测试跳过）。</summary>
+    /// <summary>指定测试字体的环境变量（TrueType .ttf 文件路径），CI 等没有系统中文字体的环境使用。</summary>
+    public const string FontEnv = "PIAOMATE_TEST_FONT";
+
+    /// <summary>可用的中文 TrueType 字体：优先环境变量 PIAOMATE_TEST_FONT，其次系统字体；都没有时返回 null。</summary>
     public static string FontPath()
     {
+        string env = Environment.GetEnvironmentVariable(FontEnv);
+        if (!string.IsNullOrWhiteSpace(env) && File.Exists(env)) return env;
         string dir = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
         foreach (var f in Fonts) { string p = Path.Combine(dir, f); if (File.Exists(p)) return p; }
         return null;
     }
 
+    static string cachedPath;
+    static byte[] cachedFont;
+
     public byte[] Build()
     {
         string fontPath = FontPath();
         if (fontPath == null) throw new InvalidOperationException("未找到中文字体");
-        // 黑体没有半角 ¥，用全角 ￥（解析器两者都支持）
+        if (cachedPath != fontPath) { cachedFont = File.ReadAllBytes(fontPath); cachedPath = fontPath; }
+        // 黑体等字体没有半角 ¥，用全角 ￥（解析器两者都支持）
         string yen = Path.GetFileName(fontPath).Equals("Deng.ttf", StringComparison.OrdinalIgnoreCase) ? "¥" : "￥";
         var b = new PdfDocumentBuilder();
-        var font = b.AddTrueTypeFont(File.ReadAllBytes(fontPath));
+        var font = b.AddTrueTypeFont(cachedFont);
         var page = b.AddPage(UglyToad.PdfPig.Content.PageSize.A4, true); // 纵向，宽 595
         Action<string, double, double, double> T = (s, x, y, size) => page.AddText(s, size, new PdfPoint(x, y), font);
         string amt = Amount.ToString("F2", CultureInfo.InvariantCulture);

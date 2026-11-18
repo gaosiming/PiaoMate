@@ -31,7 +31,7 @@ static class T
         string repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, @"..\..\..\..\.."));
         string root = Path.Combine(repo, "mock");
         // 测试用发票：运行时生成的虚构发票（仓库中不放真实发票）
-        if (SampleInvoice.FontPath() == null) { Console.WriteLine("FAIL 未找到中文字体（Deng.ttf / simhei.ttf），无法生成测试发票"); return 1; }
+        if (SampleInvoice.FontPath() == null) { Console.WriteLine("FAIL 未找到中文字体（Deng.ttf / simhei.ttf，或用环境变量 " + SampleInvoice.FontEnv + " 指定 .ttf），无法生成测试发票"); return 1; }
         string samples = Path.Combine(Path.GetTempPath(), "fp_samples_" + Guid.NewGuid().ToString("N"));
         var A = SampleInvoice.A; var B = SampleInvoice.B;
         var f1 = A.Save(Path.Combine(samples, A.Number + "_" + A.BuyerName + "_34.92.pdf"));
