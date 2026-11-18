@@ -25,6 +25,8 @@ namespace PiaoMate
             };
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            // 首次启动（或免责声明版本更新后）须同意免责声明，不同意则退出
+            if (!DisclaimerForm.EnsureAccepted()) return;
             Application.Run(new MainForm());
         }
     }

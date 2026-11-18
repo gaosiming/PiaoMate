@@ -78,6 +78,9 @@ namespace PiaoMate
             var tbLog = new ToolStripButton("更新日志") { Alignment = ToolStripItemAlignment.Right, ToolTipText = "查看各版本的改动记录" };
             tbLog.Click += (s, e) => ChangelogForm.ShowLog(this);
             tools.Items.Add(tbLog);
+            var tbDisclaimer = new ToolStripButton("免责声明") { Alignment = ToolStripItemAlignment.Right, ToolTipText = "查看免责声明" };
+            tbDisclaimer.Click += (s, e) => DisclaimerForm.Show(this, false);
+            tools.Items.Add(tbDisclaimer);
             Controls.Add(tools);
 
             // 目录

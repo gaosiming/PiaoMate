@@ -39,6 +39,8 @@
   <ItemGroup>
     <!-- 更新日志：软件内「更新日志」窗口显示 -->
     <EmbeddedResource Include="..\CHANGELOG.md" LogicalName="CHANGELOG.md" />
+    <!-- 免责声明：首次启动确认、工具栏「免责声明」窗口显示 -->
+    <EmbeddedResource Include="..\docs\免责声明.md" LogicalName="免责声明.md" />
   </ItemGroup>
   <!-- 把依赖 DLL 嵌入 exe，实现单文件便携 -->
   <Target Name="EmbedDeps" AfterTargets="ResolveAssemblyReferences">

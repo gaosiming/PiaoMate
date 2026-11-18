@@ -15,6 +15,8 @@ namespace PiaoMate
         public string ArchiveDir = "";
         /// <summary>扫码开票时自动填写的手机号、邮箱，以及上次选择的开票公司（税号）</summary>
         public string Phone = "", Email = "", IssueCompany = "";
+        /// <summary>已同意的免责声明版本（见 DisclaimerForm.Version），为空表示尚未同意。</summary>
+        public string DisclaimerAccepted = "";
         public string EffectiveArchiveDir
         {
             get { return ArchiveDir.Length > 0 ? ArchiveDir : (ExportDir.Length > 0 ? Path.Combine(ExportDir, "发票整理") : ""); }
@@ -107,6 +109,7 @@ namespace PiaoMate
                 if (d.TryGetValue("Phone", out v)) s.Phone = v;
                 if (d.TryGetValue("Email", out v)) s.Email = v;
                 if (d.TryGetValue("IssueCompany", out v)) s.IssueCompany = v;
+                if (d.TryGetValue("DisclaimerAccepted", out v)) s.DisclaimerAccepted = v;
                 if (d.TryGetValue("Recurse", out v)) s.Recurse = v == "1";
                 if (d.TryGetValue("DateEnabled", out v)) s.DateEnabled = v == "1";
                 DateTime dt;
@@ -143,6 +146,7 @@ namespace PiaoMate
             sb.AppendLine("Phone=" + Phone);
             sb.AppendLine("Email=" + Email);
             sb.AppendLine("IssueCompany=" + IssueCompany);
+            sb.AppendLine("DisclaimerAccepted=" + DisclaimerAccepted);
             sb.AppendLine("Recurse=" + (Recurse ? "1" : "0"));
             sb.AppendLine("DateEnabled=" + (DateEnabled ? "1" : "0"));
             sb.AppendLine("DateFrom=" + DateFrom.ToString("yyyy-MM-dd"));

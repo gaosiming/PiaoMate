@@ -263,6 +263,21 @@ static class T
         string sample = "# 更新日志\n\n说明\n\n## [未发布]\n\n## [1.2.0] - 2026-01-02\n\n### 新增\n- 支持 `A`\n\n## [1.1.0] - 2026-01-01\n- 旧\n";
         Eq("v1.2.0 - 2026-01-02\r\n【新增】\r\n  · 支持 A\r\n\r\nv1.1.0 - 2026-01-01\r\n  · 旧", ChangelogForm.Text(sample), "更新日志显示文本");
         Eq(true, ChangelogForm.Text("## [未发布]\n### 修复\n- x\n").StartsWith("未发布"), "未发布有内容时显示");
+
+        // 免责声明：嵌入 exe，首次启动须同意；同意的版本保存在配置中
+        string dis = DisclaimerForm.Raw();
+        Eq(File.ReadAllText(Path.Combine(repo, "docs", "免责声明.md"), System.Text.Encoding.UTF8).Replace("\r\n", "\n").TrimStart('﻿'), dis.Replace("\r\n", "\n").TrimStart('﻿'), "免责声明已嵌入 exe 且与 docs 一致");
+        string disText = DisclaimerForm.Text(dis);
+        Eq(true, disText.Contains("非真实发票") && disText.Contains("与本软件作者及贡献者无关"), "免责声明含关键内容");
+        Eq(false, disText.Contains("**") || disText.Contains("`") || disText.Contains("# "), "免责声明去掉 Markdown 标记");
+        Eq("1. 甲 乙\r\n\r\n2. 丙", DisclaimerForm.Text("# 标题\n\n1. **甲** `乙`\n2. 丙\n"), "免责声明显示文本");
+        Eq(true, DisclaimerForm.NeedsConfirm(new Settings()), "未同意时需确认");
+        string dcp = Path.Combine(Path.GetTempPath(), "fp_cfg_dis_" + Guid.NewGuid().ToString("N") + ".txt");
+        new Settings { DisclaimerAccepted = DisclaimerForm.Version }.Save(dcp);
+        Eq(false, DisclaimerForm.NeedsConfirm(Settings.Load(dcp)), "同意后不再确认");
+        new Settings { DisclaimerAccepted = "0" }.Save(dcp);
+        Eq(true, DisclaimerForm.NeedsConfirm(Settings.Load(dcp)), "免责声明版本更新后重新确认");
+        File.Delete(dcp);
     }
 
     /// <summary>百望云：用虚构参数与模拟接口验证（不联网）。</summary>
