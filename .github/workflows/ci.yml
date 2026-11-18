@@ -96,6 +96,8 @@ jobs:
           ver="${TAG#v}"
           # 更新日志中本版本的小节作为发布说明
           awk -v v="## [$ver]" 'index($0, v) == 1 { on = 1; next } on && /^## \[/ { exit } on' CHANGELOG.md | sed 's/\r$//' > notes.md
+          # 每次发布都附上免责声明（去掉一级标题，改为二级）
+          { printf '\n'; sed 's/\r$//; s/^\xEF\xBB\xBF//; s/^# /## /' docs/免责声明.md; } >> notes.md
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" dist/*.zip --clobber
           else

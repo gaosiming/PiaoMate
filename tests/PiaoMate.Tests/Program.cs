@@ -47,6 +47,9 @@ static class T
         Eq(true, a.Ok, "a.Ok"); Eq(34.92m, a.Amount, "a.Amount"); Eq(A.BuyerTaxId, a.BuyerTaxId, "a.tax");
         Eq(A.BuyerName, a.BuyerName, "a.buyer"); Eq(A.SellerName, a.SellerName, "a.seller"); Eq(A.Number, a.Number, "a.number");
         Eq(new DateTime(2026, 8, 27), a.Date.Value, "a.date"); Eq(A.Item, a.Item, "a.item");
+        // 测试发票必须标明「非真实发票」（见 docs/免责声明.md）
+        using (var doc = UglyToad.PdfPig.PdfDocument.Open(f1))
+            Eq(true, string.Concat(doc.GetPage(1).Letters.Select(l => l.Value)).Contains("非真实发票"), "测试发票标注非真实发票");
         var b = InvoiceParser.Parse(f2);
         Eq(33.08m, b.Amount, "b.Amount"); Eq(B.BuyerTaxId, b.BuyerTaxId, "b.tax"); Eq(B.BuyerName, b.BuyerName, "b.buyer");
         Eq(new DateTime(2026, 11, 11), b.Date.Value, "b.date"); Eq(B.Item, b.Item, "b.item");

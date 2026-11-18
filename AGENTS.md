@@ -59,3 +59,5 @@ Treat invoice PDFs as potentially sensitive. Do not commit credentials, personal
 
 - 公开版（默认构建）不含任何公司信息；内部版的公司列表在 `internal\companies.txt`（git-ignored，示例 `internal\companies.example.txt`）。
 - 文档、测试、示例只用虚构数据（如 `示例科技有限公司`、`91110000MA00000001`）。
+- 免责声明在 `docs/免责声明.md`（随发布包分发，CI 发布时附在 Release 说明末尾；README、使用说明、快速使用手册中有摘要）。测试生成的虚构发票页面上必须标注「非真实发票」（有测试校验）。
+- README 顶部宣传图 `docs/images/social-preview.png`（1280×640，也用作 GitHub 社交预览图，数据均为虚构）；主界面截图 `docs/images/main.png`。

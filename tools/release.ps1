@@ -201,7 +201,7 @@ foreach ($bd in $builds) {
     New-Item -ItemType Directory -Force $rel | Out-Null
     Copy-Item $bd.Exe $rel -Force
     $zipItems = @(Join-Path $rel 'PiaoMate.exe')
-    foreach ($pair in @(@('docs\使用说明.md', '使用说明.md'), @('docs\快速使用手册.md', '快速使用手册.md'), @('CHANGELOG.md', '更新日志.md'), @('LICENSE', 'LICENSE.txt'), @('THIRD-PARTY-NOTICES.txt', 'THIRD-PARTY-NOTICES.txt'))) {
+    foreach ($pair in @(@('docs\使用说明.md', '使用说明.md'), @('docs\快速使用手册.md', '快速使用手册.md'), @('CHANGELOG.md', '更新日志.md'), @('docs\免责声明.md', '免责声明.md'), @('LICENSE', 'LICENSE.txt'), @('THIRD-PARTY-NOTICES.txt', 'THIRD-PARTY-NOTICES.txt'))) {
         $srcDoc = Join-Path $root $pair[0]
         if (Test-Path $srcDoc) { $dst = Join-Path $rel $pair[1]; Copy-Item $srcDoc $dst -Force; $zipItems += $dst }
     }
