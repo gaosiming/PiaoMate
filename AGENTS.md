@@ -35,7 +35,7 @@ Pull requests should describe the change, explain validation performed, link rel
 
 Treat invoice PDFs as potentially sensitive. Do not commit credentials, personal information, or real invoice data without appropriate authorization. Prefer anonymized samples and exclude generated exports and local configuration from version control when Git is initialized.
 
-## 当前实现（v1.0.1）
+## 当前实现（v1.0.2）
 
 - 技术栈：C# WinForms，目标 .NET Framework 4.8（Windows 10/11 自带，无需安装运行时）；PDF 解析使用 PdfPig，依赖 DLL 已嵌入 exe，单文件便携。
 - 二维码识别使用 ZXing.Net（同样嵌入 exe）；下载用 `System.Net.Http`，删除原文件用 `Microsoft.VisualBasic` 移入回收站。
