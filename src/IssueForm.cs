@@ -20,6 +20,7 @@ namespace PiaoMate
     public class IssueForm : Form
     {
         readonly Settings cfg;
+        readonly InvoiceHistory history;
         readonly string startUrl, archiveDir;
         readonly Action<List<OrganizeItem>> onOrganized;
         readonly HashSet<string> seen = new HashSet<string>();
@@ -38,8 +39,11 @@ namespace PiaoMate
         public int CapturedCount { get { return captured; } }
 
         public IssueForm(Settings cfg, string url, string archiveDir, Action<List<OrganizeItem>> onOrganized)
+            : this(cfg, url, archiveDir, null, onOrganized) { }
+
+        public IssueForm(Settings cfg, string url, string archiveDir, InvoiceHistory history, Action<List<OrganizeItem>> onOrganized)
         {
-            this.cfg = cfg; startUrl = url; this.archiveDir = archiveDir; this.onOrganized = onOrganized;
+            this.cfg = cfg; this.history = history ?? InvoiceHistory.Default; startUrl = url; this.archiveDir = archiveDir; this.onOrganized = onOrganized;
             Text = "扫码开票（内置浏览器）";
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei UI", 9f);
@@ -187,6 +191,7 @@ namespace PiaoMate
                 if (!e.IsSuccess) lblStatus.Text = "页面加载失败（" + e.WebErrorStatus + "）。";
                 else if (captured == 0) lblStatus.Text = "请核对自动填写的信息，确认无误后在页面上点击提交开票。";
                 RunFill();
+                if (e.IsSuccess) TryDecodeQrFromPage();
             };
             core.NewWindowRequested += (s, e) => { e.Handled = true; core.Navigate(e.Uri); };
             core.WebResourceResponseReceived += OnResponse;
@@ -207,6 +212,21 @@ namespace PiaoMate
         }
 
         void Refill() { forceNext = true; RunFill(); }
+
+        /// <summary>
+        /// 检测页面是否只显示一张图片（浏览器直接打开图片 URL 时会生成仅含 img 的页面），
+        /// 若是则把图片内容以 Base64 通过 postMessage 回传，由 C# 端识别二维码后跳转。
+        /// </summary>
+        async void TryDecodeQrFromPage()
+        {
+            var core = web != null ? web.CoreWebView2 : null;
+            if (core == null) return;
+            try
+            {
+                await core.ExecuteScriptAsync(QrExtractScript);
+            }
+            catch { }
+        }
 
         async void RunFill()
         {
@@ -274,10 +294,50 @@ namespace PiaoMate
         {
             string m;
             try { m = e.TryGetWebMessageAsString(); } catch { return; }
-            if (m == null || !m.StartsWith("FPPDF|")) return;
-            int k = m.IndexOf('|', 6);
-            if (k < 0) return;
-            try { HandlePdf(Convert.FromBase64String(m.Substring(k + 1)), NameFromUri(m.Substring(6, k - 6))); } catch { }
+            if (m == null) return;
+            if (m.StartsWith("FPPDF|"))
+            {
+                int k = m.IndexOf('|', 6);
+                if (k < 0) return;
+                try { HandlePdf(Convert.FromBase64String(m.Substring(k + 1)), NameFromUri(m.Substring(6, k - 6))); } catch { }
+                return;
+            }
+            if (m.StartsWith("FPQR|"))
+            {
+                try { HandleQrImage(m.Substring(5)); } catch { }
+                return;
+            }
+        }
+
+        /// <summary>收到页面图片的 Base64 数据后，识别二维码并跳转。</summary>
+        void HandleQrImage(string base64)
+        {
+            byte[] data;
+            try { data = Convert.FromBase64String(base64); } catch { return; }
+            List<string> codes;
+            try
+            {
+                using (var ms = new MemoryStream(data))
+                using (var bmp = new Bitmap(ms))
+                    codes = QrDecoder.Decode(bmp);
+            }
+            catch { codes = new List<string>(); }
+            if (codes.Count == 0) return;
+            // 提取 URL 并跳转到第一个
+            foreach (var c in codes)
+            {
+                var urls = Downloader.ExtractUrls(c);
+                if (urls.Count > 0)
+                {
+                    lblStatus.Text = "识别到二维码，正在跳转…";
+                    web.CoreWebView2.Navigate(urls[0]);
+                    return;
+                }
+                // 检查是否为发票查验二维码
+                string desc = Downloader.DescribeVerifyQr(c);
+                if (desc != null) { lblStatus.Text = desc; lblStatus.ForeColor = Color.Firebrick; return; }
+            }
+            lblStatus.Text = "识别到二维码，但内容不是网址：" + (codes[0].Length > 60 ? codes[0].Substring(0, 60) + "…" : codes[0]);
         }
 
         static string NameFromUri(string uri)
@@ -303,7 +363,7 @@ namespace PiaoMate
             List<OrganizeItem> res;
             try
             {
-                res = Organizer.Organize(new[] { InvoiceParser.Parse(file) }, archiveDir, includeUnknown: true);
+                res = Organizer.Organize(new[] { InvoiceParser.Parse(file) }, archiveDir, includeUnknown: true, history: history, historyNote: "扫码开票");
                 Organizer.WriteIndex(res, DateTime.Now);
             }
             catch (Exception ex) { lblStatus.Text = "整理失败：" + ex.Message; return; }
@@ -313,7 +373,7 @@ namespace PiaoMate
             lblStatus.ForeColor = r.Verified ? Color.DarkGreen : Color.Firebrick;
             lblStatus.Text = r.Verified
                 ? (r.Invoice.Ok ? "已获取发票并整理：" : "已获取 PDF（未识别为发票，放入 " + Organizer.UnknownFolder + "）：") + Path.GetFileName(r.Target)
-                : "保存失败：" + r.Status;
+                : (r.Blocked ? r.Status : "保存失败：" + r.Status);
             if (onOrganized != null) onOrganized(res);
         }
 
@@ -392,6 +452,28 @@ for(var k in n){if(R[k])done.push(n[k]);else if(vals[k])miss.push(n[k]);}
 if(!done.length&&!sub)return '';
 return (done.length?'已自动填写（黄色）：'+done.join('、')+'。':'')+(miss.length&&done.length?'未找到：'+miss.join('、')+'，如需要请手动填写。':'')+(sub?'请核对后自己点击红框按钮提交开票（软件不会替你提交）。':'');
 })";
+
+        /// <summary>
+        /// 检测页面是否只显示一张图片（浏览器直接打开图片 URL 时会生成仅含 img 的页面），
+        /// 若是则把图片用 canvas 转为 Base64 通过 postMessage 回传给 C# 识别二维码。
+        /// </summary>
+        public const string QrExtractScript = @"(function(){
+if(window.__fpQrDone)return;
+var imgs=document.querySelectorAll('img');
+if(imgs.length!==1)return;
+var img=imgs[0];
+if(!img.complete||!img.naturalWidth)return;
+var body=document.body;
+if(body&&body.children.length>2)return;
+window.__fpQrDone=1;
+try{
+var c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;
+var ctx=c.getContext('2d');ctx.drawImage(img,0,0);
+var d=c.toDataURL('image/png');
+var i=d.indexOf(',');if(i<0)return;
+window.chrome.webview.postMessage('FPQR|'+d.substring(i+1));
+}catch(e){}
+})()";
 
         /// <summary>收集页面中指向 PDF 的链接（换行分隔）。</summary>
         public const string LinkScript = @"(function(){var s={};[].forEach.call(document.querySelectorAll('a[href],iframe[src],embed[src],object[data]'),function(e){var u=e.href||e.src||e.data;if(u&&/^https?:/i.test(u)&&/\.pdf(\?|#|$)|[?&](type|format|filetype|fileType)=pdf|downloadpdf|pdfurl|pdf_url/i.test(u))s[u]=1;});return Object.keys(s).join('\n');})()";

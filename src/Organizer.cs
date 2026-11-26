@@ -13,10 +13,12 @@ namespace PiaoMate
     {
         public Invoice Invoice;
         public string Source, Target = "";
-        /// <summary>已复制 / 目标已存在相同文件 / 失败</summary>
+        /// <summary>已复制 / 目标已存在相同文件 / 拦截：… / 失败</summary>
         public string Status = "";
         /// <summary>归档目录中已有与源文件内容完全一致的副本（只有此时才允许删除原文件）。</summary>
         public bool Verified;
+        /// <summary>因导入/导出记录冲突或发票号重复而被拦截。</summary>
+        public bool Blocked;
         public bool SourceDeleted;
     }
 
@@ -70,12 +72,22 @@ namespace PiaoMate
 
         /// <summary>
         /// 把发票复制到 archiveDir 下的分类子文件夹。includeUnknown 为 true 时，无法识别的 PDF 原名复制到 _未识别。
-        /// 目标已有同名且内容相同的文件时不再复制（视为已归档）；同名但内容不同则加序号。
+        /// 传入 history 时会按发票号（无发票号时按 SHA-256）拦截已导出或已导入的重复发票，并在成功后追加导入记录。
         /// </summary>
-        public static List<OrganizeItem> Organize(IEnumerable<Invoice> invoices, string archiveDir, bool includeUnknown = false)
+        public static List<OrganizeItem> Organize(IEnumerable<Invoice> invoices, string archiveDir, bool includeUnknown = false, InvoiceHistory history = null, string historyNote = "整理")
+        {
+            if (history == null) return OrganizeCore(invoices, archiveDir, includeUnknown, null, historyNote);
+            lock (history.SyncRoot) return OrganizeCore(invoices, archiveDir, includeUnknown, history, historyNote);
+        }
+
+        static List<OrganizeItem> OrganizeCore(IEnumerable<Invoice> invoices, string archiveDir, bool includeUnknown, InvoiceHistory history, string historyNote)
         {
             Directory.CreateDirectory(archiveDir);
+            if (history != null) history.ReloadIfChanged();
             var results = new List<OrganizeItem>();
+            var seenNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var newlyImported = new List<Tuple<Invoice, string>>();
             foreach (var inv in invoices)
             {
                 var it = new OrganizeItem { Invoice = inv, Source = inv.Path };
@@ -87,9 +99,49 @@ namespace PiaoMate
                     string dir = Path.Combine(archiveDir, Path.GetDirectoryName(rel));
                     string stem = Path.GetFileNameWithoutExtension(rel), ext = Path.GetExtension(rel);
                     if (ext.Length == 0) ext = ".pdf";
-                    Directory.CreateDirectory(dir);
                     string srcHash = Hash(inv.Path);
                     string target = Path.Combine(dir, stem + ext);
+                    string num = inv.Ok && !string.IsNullOrWhiteSpace(inv.Number) ? inv.Number.Trim() : "";
+
+                    if (history != null)
+                    {
+                        var expRec = history.FindExport(inv, srcHash);
+                        if (expRec != null)
+                        {
+                            it.Blocked = true;
+                            it.Status = "拦截：已于 " + expRec.Time.ToString("yyyy-MM-dd") + " 导出过";
+                            continue;
+                        }
+                        var impRec = history.FindImport(inv, srcHash);
+                        if (impRec != null)
+                        {
+                            if (File.Exists(target) && Hash(target) == srcHash)
+                            {
+                                it.Target = target;
+                                it.Verified = true;
+                                it.Status = "已存在相同文件";
+                                continue;
+                            }
+                            it.Blocked = true;
+                            it.Status = "拦截：已于 " + impRec.Time.ToString("yyyy-MM-dd") + " 导入过";
+                            continue;
+                        }
+                        if (num.Length > 0 ? seenNums.Contains(num) : seenHashes.Contains(srcHash))
+                        {
+                            if (File.Exists(target) && Hash(target) == srcHash)
+                            {
+                                it.Target = target;
+                                it.Verified = true;
+                                it.Status = "已存在相同文件";
+                                continue;
+                            }
+                            it.Blocked = true;
+                            it.Status = "拦截：本次列表中发票重复";
+                            continue;
+                        }
+                    }
+
+                    Directory.CreateDirectory(dir);
                     for (int k = 2; ; k++)
                     {
                         if (string.Equals(Path.GetFullPath(target), Path.GetFullPath(inv.Path), StringComparison.OrdinalIgnoreCase))
@@ -102,12 +154,30 @@ namespace PiaoMate
                             it.Status = it.Verified ? "已复制" : "失败：复制后校验不一致";
                             break;
                         }
-                        if (Hash(target) == srcHash) { it.Target = target; it.Verified = true; it.Status = "已存在相同文件"; break; }
+                        if (Hash(target) == srcHash)
+                        {
+                            it.Target = target; it.Verified = true; it.Status = "已存在相同文件";
+                            break;
+                        }
+                        if (history != null && num.Length > 0)
+                        {
+                            it.Blocked = true;
+                            it.Status = "拦截：目标目录已存在同发票号文件";
+                            break;
+                        }
                         target = Path.Combine(dir, stem + "(" + k + ")" + ext);
+                    }
+                    if (it.Verified && history != null)
+                    {
+                        if (num.Length > 0) seenNums.Add(num);
+                        else seenHashes.Add(srcHash);
+                        newlyImported.Add(Tuple.Create(inv, srcHash));
                     }
                 }
                 catch (Exception ex) { it.Status = "失败：" + ex.Message; it.Verified = false; }
             }
+            if (history != null && newlyImported.Count > 0)
+                history.RecordImports(newlyImported, historyNote);
             return results;
         }
 

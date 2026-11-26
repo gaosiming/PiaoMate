@@ -41,8 +41,10 @@ $changelog = Join-Path $root 'CHANGELOG.md'
 $dist = Join-Path $root 'build\dist'
 $backupDir = Join-Path $root 'build\config-backup'
 $cfgName = 'PiaoMate.config'
-$cfgNames = @('PiaoMate.config')
-function Find-Cfg($dir) { foreach ($n in $cfgNames) { $c = Join-Path $dir $n; if (Test-Path $c) { return $c } }; return $null }
+$histName = 'PiaoMate.history.tsv'
+$cfgNames = @('PiaoMate.config', 'PiaoMate.history.tsv')
+function Find-UserFile($dir, $name) { $c = Join-Path $dir $name; if (Test-Path $c) { return $c }; return $null }
+function Find-Cfg($dir) { return Find-UserFile $dir $cfgName }
 $utf8Bom = New-Object Text.UTF8Encoding($true)
 $Unreleased = '## [未发布]'
 
@@ -210,10 +212,21 @@ foreach ($bd in $builds) {
     for ($i = 0; $i -lt 5; $i++) { try { Compress-Archive -Path $zipItems -DestinationPath $zip -Force -ErrorAction Stop; break } catch { Start-Sleep 2; if ($i -eq 4) { throw } } }
     $rels += $rel; $rels += $zip
 }
-# 个人配置只放到自己用的版本（有内部版时放内部版）旁边
+# 个人配置和历史记录只放到自己用的版本（有内部版时放内部版）旁边
 $own = Join-Path $dist ($builds | Sort-Object { $_.Edition -ne 'Internal' } | Select-Object -First 1).Name
 if ($cfgSrc) { Copy-Item $cfgSrc (Join-Path $own $cfgName) -Force; Write-Host "已把配置带到新版本：$cfgSrc -> $own" }
 else { Write-Host '没有找到旧配置（首次发布或尚未运行过软件），新版本将使用默认配置。' }
+$histSrc = $null
+foreach ($d in $oldDirs) { $h = Find-UserFile $d.FullName $histName; if ($h) { $histSrc = $h; break } }
+if (-not $histSrc) { $histSrc = Find-UserFile $backupDir $histName }
+$selfHist = Get-ChildItem $dist -Directory | Where-Object { (Get-VerKey $_.Name) -eq $newKey } | ForEach-Object { Find-UserFile $_.FullName $histName } | Where-Object { $_ } | Select-Object -First 1
+if ($selfHist) { Copy-Item $selfHist (Join-Path $backupDir $histName) -Force; $histSrc = Join-Path $backupDir $histName }
+elseif ($histSrc) {
+    $bkH = Join-Path $backupDir $histName
+    if ([IO.Path]::GetFullPath($histSrc) -ne [IO.Path]::GetFullPath($bkH)) { Copy-Item $histSrc $bkH -Force }
+    $histSrc = $bkH
+}
+if ($histSrc) { Copy-Item $histSrc (Join-Path $own $histName) -Force; Write-Host "已把导入导出记录带到新版本：$histSrc -> $own" }
 
 # ---------- 6. 清理旧版本（保留最近 $Keep 个版本号的公开版/内部版；被占用的删不掉就跳过；历史改动仍保留在更新日志中） ----------
 $all = Get-ChildItem $dist -Directory | Where-Object { (Get-VerKey $_.Name) -ge 0 }

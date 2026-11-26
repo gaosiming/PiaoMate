@@ -108,11 +108,19 @@ static class T
 
         // 设置往返
         string cp = Path.Combine(Path.GetTempPath(), "fp_cfg.txt");
-        var s = new Settings { InvoiceDir = @"D:\a=b", Target = "12.5", CompanyChoice = "custom", Companies = new List<System.Collections.Generic.KeyValuePair<string,string>>{ new System.Collections.Generic.KeyValuePair<string,string>("甲公司","TAX1"), new System.Collections.Generic.KeyValuePair<string,string>("乙|公司","TAX2") }, CustomName = "某公司", DateEnabled = true };
+        var s = new Settings { InvoiceDir = @"D:\a=b", Target = "12.5", CompanyChoice = "custom", Companies = new List<System.Collections.Generic.KeyValuePair<string,string>>{ new System.Collections.Generic.KeyValuePair<string,string>("甲公司","TAX1"), new System.Collections.Generic.KeyValuePair<string,string>("乙|公司","TAX2") }, CustomName = "某公司", DateEnabled = true, MainColOrder = "amount,number,date,buyer,tax,dir,item,file", AutoDeleteAfterOrganize = false, AutoDeletePromptYear = 2026 };
         s.Save(cp); var s2 = Settings.Load(cp);
         Eq(@"D:\a=b", s2.InvoiceDir, "cfg dir"); Eq("custom", s2.CompanyChoice, "cfg choice"); Eq(2, s2.Companies.Count, "cfg comps"); Eq("乙|公司", s2.Companies[1].Key, "cfg comp name"); Eq("TAX2", s2.Companies[1].Value, "cfg comp tax"); Eq(0, new Settings().Companies.Count, "公开版无内置公司"); Eq(false, Settings.IsInternalEdition, "测试为公开版"); Eq("某公司", s2.CustomName, "cfg name"); Eq(true, s2.DateEnabled, "cfg date");
+        Eq("amount,number,date,buyer,tax,dir,item,file", s2.MainColOrder, "cfg colOrder");
+        Eq(false, s2.AutoDeleteAfterOrganize, "cfg autoDelete");
+        Eq(2026, s2.AutoDeletePromptYear, "cfg autoDeleteYear");
+        Eq(true, new Settings().AutoDeleteAfterOrganize, "默认整理后删除原文件");
+        Eq(false, OrganizeForm.ShouldPromptAutoDelete(s2, 2026), "本年度不再提示");
+        Eq(true, OrganizeForm.ShouldPromptAutoDelete(s2, 2027), "跨年重新提示");
         File.Delete(cp);
 
+        ColumnOrderTests();
+        HistoryAndDedupTests(f1, f2);
         OrganizerTests(f1, f2);
         DownloadListUiTests(f1);
         DownloaderTests(f1).GetAwaiter().GetResult();
@@ -167,8 +175,9 @@ static class T
         string tmp = Path.Combine(Path.GetTempPath(), "fp_dlui_" + Guid.NewGuid().ToString("N"));
         string src = Path.Combine(tmp, "原始.pdf"); Directory.CreateDirectory(tmp); File.Copy(f1, src);
         var cfg = new Settings { ArchiveDir = Path.Combine(tmp, "归档") };
+        var hist = new InvoiceHistory(Path.Combine(tmp, "history.tsv"));
         var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static;
-        using (var form = new DownloadForm(cfg))
+        using (var form = new DownloadForm(cfg, hist))
         {
             form.Show();
             typeof(DownloadForm).GetMethod("AddFiles", flags).Invoke(form, new object[] { new[] { src } });
@@ -466,6 +475,102 @@ static class T
         var res = Organizer.Organize(new[] { InvoiceParser.Parse(Directory.GetFiles(dir, "发票9.pdf")[0]) }, Path.Combine(dir, "归档"), true);
         Eq(true, res[0].Verified && res[0].Target.EndsWith("34.92_示例科技有限公司_91110000MA00000001_26110000000000000001_20260827.pdf"), "下载后整理");
         Directory.Delete(dir, true);
+    }
+
+    /// <summary>主窗口列顺序：默认顺序、名称、调整与持久化。</summary>
+    static void ColumnOrderTests()
+    {
+        var lv = new System.Windows.Forms.ListView { View = System.Windows.Forms.View.Details, AllowColumnReorder = true };
+        lv.Columns.Add(new System.Windows.Forms.ColumnHeader { Name = "chk", Text = "" });
+        lv.Columns.Add(new System.Windows.Forms.ColumnHeader { Name = "number", Text = "发票号" });
+        lv.Columns.Add(new System.Windows.Forms.ColumnHeader { Name = "amount", Text = "发票金额" });
+        lv.Columns.Add(new System.Windows.Forms.ColumnHeader { Name = "date", Text = "开票日期" });
+        lv.Columns.Add(new System.Windows.Forms.ColumnHeader { Name = "buyer", Text = "公司抬头(购买方)" });
+        lv.Columns.Add(new System.Windows.Forms.ColumnHeader { Name = "tax", Text = "税号" });
+        lv.Columns.Add(new System.Windows.Forms.ColumnHeader { Name = "dir", Text = "所在目录" });
+        lv.Columns.Add(new System.Windows.Forms.ColumnHeader { Name = "item", Text = "项目名称" });
+        lv.Columns.Add(new System.Windows.Forms.ColumnHeader { Name = "file", Text = "文件名 / 状态" });
+        Eq("number,amount,date,buyer,tax,dir,item,file", MainForm.GetColumnOrder(lv), "默认列顺序");
+        MainForm.ApplyColumnOrder(lv, "date,number,amount,unknown_col");
+        Eq(0, lv.Columns[0].DisplayIndex, "勾选列固定首位");
+        Eq("date,number,amount,buyer,tax,dir,item,file", MainForm.GetColumnOrder(lv), "恢复列顺序并补齐剩余列");
+        lv.Dispose();
+    }
+
+    /// <summary>导入导出记录、14个月保留期、性能与去重拦截。</summary>
+    static void HistoryAndDedupTests(string f1, string f2)
+    {
+        string tmp = Path.Combine(Path.GetTempPath(), "fp_hist_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmp);
+        string hp = Path.Combine(tmp, "history.tsv");
+        DateTime now = new DateTime(2026, 11, 26, 10, 0, 0);
+        var hist = new InvoiceHistory(hp, now);
+        var a = InvoiceParser.Parse(f1);
+        var b = InvoiceParser.Parse(f2);
+
+        // 1. 记录导入与过期清理（14 个月）
+        hist.RecordImport(a, "整理", Organizer.Hash(f1), now.AddMonths(-15)); // 超过 14 个月
+        hist.RecordImport(b, "整理", Organizer.Hash(f2), now.AddMonths(-13)); // 14 个月内
+        var hist2 = new InvoiceHistory(hp, now);
+        Eq(null, hist2.FindImport(a), "超过14个月的记录自动清理");
+        Eq(true, hist2.FindImport(b) != null, "14个月内的记录保留");
+        Eq(1, hist2.Count, "过期清理后条数");
+        hist2.ReloadIfChanged(now.AddMonths(2));
+        Eq(0, hist2.Count, "运行期间跨过保留期后清理记录");
+
+        // 2. 整理去重与已导出拦截（即使本地已无归档文件）
+        string src = Path.Combine(tmp, "src"), arc = Path.Combine(tmp, "arc");
+        Directory.CreateDirectory(src);
+        string s1 = Path.Combine(src, "a1.pdf"), s1dup = Path.Combine(src, "a1_dup.pdf");
+        File.Copy(f1, s1); File.Copy(f1, s1dup);
+        var h3 = new InvoiceHistory(Path.Combine(tmp, "h3.tsv"), now);
+        var r1 = Organizer.Organize(new[] { InvoiceParser.Parse(s1) }, arc, false, h3, "整理");
+        Eq("已复制", r1[0].Status, "首次整理成功");
+        Eq(true, h3.FindImport(a) != null, "整理后写入导入记录");
+
+        // 删除归档文件，再次导入同发票号应被拦截
+        File.Delete(r1[0].Target);
+        var r2 = Organizer.Organize(new[] { InvoiceParser.Parse(s1dup) }, arc, false, h3, "整理");
+        Eq(true, r2[0].Blocked && !r2[0].Verified && r2[0].Status.Contains("导入过"), "重复导入拦截");
+
+        // 导出记录拦截再次导入
+        h3.RecordExport(new[] { b }, "20261126_100000", now);
+        string s2 = Path.Combine(src, "b1.pdf"); File.Copy(f2, s2);
+        var r3 = Organizer.Organize(new[] { InvoiceParser.Parse(s2) }, arc, false, h3, "下载");
+        Eq(true, r3[0].Blocked && !r3[0].Verified && r3[0].Status.Contains("导出过"), "已导出发票禁止再次导入");
+
+        // 3. 匹配候选过滤：排除已导出 & 列表内同发票号去重
+        var aDup = InvoiceParser.Parse(s1dup);
+        int skExp, skDup;
+        var cands = MainForm.FilterMatchCandidates(new[] { a, aDup, b }, h3, out skExp, out skDup);
+        Eq(1, cands.Count, "匹配候选去重并排除已导出");
+        Eq(1, skExp, "排除已导出计数");
+        Eq(1, skDup, "列表重复去重计数");
+
+        var noNumber = new Invoice { Path = s1, FileName = "a1.pdf", Ok = true };
+        var noNumberCopy = new Invoice { Path = s1dup, FileName = "a1_dup.pdf", Ok = true };
+        var hashHistory = new InvoiceHistory(Path.Combine(tmp, "hash.tsv"), now);
+        cands = MainForm.FilterMatchCandidates(new[] { noNumber, noNumberCopy }, hashHistory, out skExp, out skDup);
+        Eq(1, cands.Count, "无发票号的相同文件只匹配一次");
+        hashHistory.RecordExport(new[] { noNumber }, "导出", now);
+        cands = MainForm.FilterMatchCandidates(new[] { noNumberCopy }, hashHistory, out skExp, out skDup);
+        Eq(0, cands.Count, "无发票号的已导出文件按哈希排除");
+
+        // 4. 性能：5000 条记录写入、加载与查重应在 1 秒内
+        string perfPath = Path.Combine(tmp, "perf.tsv");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var perfHist = new InvoiceHistory(perfPath, now);
+        var batch = new List<Tuple<Invoice, string>>();
+        for (int i = 0; i < 5000; i++)
+            batch.Add(Tuple.Create(new Invoice { Number = "261100000000000" + i.ToString("D5"), Amount = 10m + i * 0.01m, BuyerName = "示例公司", BuyerTaxId = "91110000MA00000001", Date = now.Date, Ok = true }, ""));
+        perfHist.RecordImports(batch, "批量", now);
+        var perfLoad = new InvoiceHistory(perfPath, now);
+        Eq(5000, perfLoad.Count, "5000条记录加载完整");
+        Eq(true, perfLoad.FindImportByNumber("26110000000000004999") != null, "5000条O(1)查重命中");
+        sw.Stop();
+        Eq(true, sw.ElapsedMilliseconds < 2000, "5000条读写查重耗时可控(" + sw.ElapsedMilliseconds + "ms)");
+
+        Directory.Delete(tmp, true);
     }
 }
 

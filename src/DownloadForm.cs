@@ -28,6 +28,7 @@ namespace PiaoMate
         }
 
         readonly Settings cfg;
+        readonly InvoiceHistory history;
         readonly Downloader downloader = new Downloader();
         readonly Queue<Job> queue = new Queue<Job>();
         readonly CancellationTokenSource cts = new CancellationTokenSource();
@@ -37,9 +38,10 @@ namespace PiaoMate
         bool running;
         public bool Changed { get; private set; }
 
-        public DownloadForm(Settings cfg)
+        public DownloadForm(Settings cfg, InvoiceHistory history = null)
         {
             this.cfg = cfg;
+            this.history = history ?? InvoiceHistory.Default;
             Text = "下载发票";
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei UI", 9f);
@@ -268,7 +270,7 @@ namespace PiaoMate
             if (dst.Length == 0) { MessageBox.Show(this, "请先设置「整理到」目录。", Text); return; }
             if (IssueForm.Companies(cfg).Count == 0) { MessageBox.Show(this, "还没有可用的开票抬头。请在主窗口筛选区选「自定义…」填写公司名称和税号，或在配置文件 PiaoMate.config 中用 CompanyN=名称|税号 添加备选公司。", Text); return; }
             if (!IssuePicker.Pick(this, cfg)) return;
-            var f = new IssueForm(cfg, j.OpenUrl, dst, res =>
+            var f = new IssueForm(cfg, j.OpenUrl, dst, history, res =>
             {
                 Changed = true;
                 if (j.Removed || j.Item.ListView == null) return;
@@ -276,6 +278,7 @@ namespace PiaoMate
                 string prev = j.Item.SubItems[1].Text.StartsWith("已整理") ? j.Item.SubItems[2].Text + "；" : "";
                 if (r.Verified) { r.Invoice.Path = r.Target; j.Done.Add(r); }
                 if (r.Verified) SetRow(j, r.Invoice.Ok ? "已整理" : "已整理(未识别)", prev + r.Target, r.Invoice.Ok ? Color.DarkGreen : Color.DarkOrange);
+                else if (r.Blocked) SetRow(j, "已拦截", r.Status, Color.Firebrick);
                 else SetRow(j, "失败", r.Status, Color.Firebrick);
             });
             f.Show(this);
@@ -419,18 +422,25 @@ namespace PiaoMate
                 var res = await Task.Run(() =>
                 {
                     var invs = pdfs.Select(InvoiceParser.Parse).ToList();
-                    var r = Organizer.Organize(invs, dst, includeUnknown: true);
+                    var r = Organizer.Organize(invs, dst, includeUnknown: true, history: history, historyNote: j.LocalPdf != null ? "导入PDF" : "下载");
                     Organizer.WriteIndex(r, DateTime.Now);
                     return r;
                 });
                 Changed = true;
                 var good = res.Where(r => r.Verified).ToList();
-                if (good.Count == 0) { SetRow(j, "失败", string.Join("；", res.Select(r => r.Status)), Color.Firebrick); return; }
+                var blocked = res.Where(r => r.Blocked).ToList();
+                if (good.Count == 0)
+                {
+                    if (blocked.Count > 0) SetRow(j, "已拦截", string.Join("；", blocked.Select(r => r.Status)), Color.Firebrick);
+                    else SetRow(j, "失败", string.Join("；", res.Select(r => r.Status)), Color.Firebrick);
+                    return;
+                }
                 foreach (var r in good) r.Invoice.Path = r.Target;
                 j.Done.AddRange(good);
                 bool unknown = good.Any(r => !r.Invoice.Ok);
                 string text = string.Join("；", good.Select(r => r.Target));
                 if (unknown) text = "（未识别为发票，已放入 " + Organizer.UnknownFolder + "）" + text;
+                if (blocked.Count > 0) text += "（另拦截 " + blocked.Count + " 张重复/已导出）";
                 if (j.LocalPdf != null) text += "（原文件保留）";
                 SetRow(j, unknown ? "已整理(未识别)" : "已整理", text, unknown ? Color.DarkOrange : Color.DarkGreen);
             }

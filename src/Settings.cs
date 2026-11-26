@@ -33,6 +33,12 @@ namespace PiaoMate
         public string CustomTaxId = "";
         public string Target = "";
         public int WinW = 1000, WinH = 640;
+        /// <summary>主窗口发票列表的列显示顺序（列名用逗号分隔，不含勾选列）。</summary>
+        public string MainColOrder = "";
+        /// <summary>整理完成后是否自动把原位置的发票文件移入回收站（默认 true）。</summary>
+        public bool AutoDeleteAfterOrganize = true;
+        /// <summary>勾选「本年度不再提示」时的年份（0 表示每次弹窗询问）。</summary>
+        public int AutoDeletePromptYear = 0;
 
         /// <summary>
         /// 内置备选公司。开源（公开）版没有内置公司；内部版构建时（-p:Edition=Internal）把 internal\companies.txt
@@ -132,6 +138,9 @@ namespace PiaoMate
                 if (d.TryGetValue("Target", out v)) s.Target = v;
                 if (d.TryGetValue("WinW", out v) && int.TryParse(v, out n) && n >= 600) s.WinW = n;
                 if (d.TryGetValue("WinH", out v) && int.TryParse(v, out n) && n >= 400) s.WinH = n;
+                if (d.TryGetValue("MainColOrder", out v)) s.MainColOrder = v;
+                if (d.TryGetValue("AutoDeleteAfterOrganize", out v)) s.AutoDeleteAfterOrganize = v != "0";
+                if (d.TryGetValue("AutoDeletePromptYear", out v) && int.TryParse(v, out n) && n >= 0) s.AutoDeletePromptYear = n;
             }
             catch { }
             return s;
@@ -159,6 +168,9 @@ namespace PiaoMate
             sb.AppendLine("Target=" + Target);
             sb.AppendLine("WinW=" + WinW);
             sb.AppendLine("WinH=" + WinH);
+            sb.AppendLine("MainColOrder=" + MainColOrder);
+            sb.AppendLine("AutoDeleteAfterOrganize=" + (AutoDeleteAfterOrganize ? "1" : "0"));
+            sb.AppendLine("AutoDeletePromptYear=" + AutoDeletePromptYear);
             if (path != null) { File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false)); return; }
             try { File.WriteAllText(PortablePath, sb.ToString(), new UTF8Encoding(false)); return; }
             catch { }

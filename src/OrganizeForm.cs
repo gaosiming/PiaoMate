@@ -15,6 +15,7 @@ namespace PiaoMate
     public class OrganizeForm : Form
     {
         readonly Settings cfg;
+        readonly InvoiceHistory history;
         TextBox txtSrc, txtDst;
         CheckBox chkRecurse;
         ListView lv;
@@ -27,9 +28,10 @@ namespace PiaoMate
         /// <summary>是否复制/删除过文件（主窗口据此刷新）。</summary>
         public bool Changed { get; private set; }
 
-        public OrganizeForm(Settings cfg, string invoiceDir)
+        public OrganizeForm(Settings cfg, string invoiceDir, InvoiceHistory history = null)
         {
             this.cfg = cfg;
+            this.history = history ?? InvoiceHistory.Default;
             Text = "整理发票";
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei UI", 9f);
@@ -84,18 +86,19 @@ namespace PiaoMate
             root.Controls.Add(new Label
             {
                 AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(3, 2, 3, 6),
-                Text = "按「抬头_税号」建子文件夹，文件命名为「金额_抬头_税号_发票号_开票日期.pdf」。整理时只复制、不改动原文件；整理完成后可在确认后把原文件移入回收站。"
+                Text = "按「抬头_税号」建子文件夹，文件命名为「金额_抬头_税号_发票号_开票日期.pdf」。整理核对无误后默认将原文件移入回收站（首次弹窗确认，可记住本年度不再提示）；已有导入/导出记录的发票会自动拦截。"
             }, 0, 1);
 
             lv = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, CheckBoxes = true, HideSelection = false, ShowItemToolTips = true };
             lv.Columns.Add("", 24);
-            lv.Columns.Add("状态", 120);
-            lv.Columns.Add("抬头(购买方)", 210);
-            lv.Columns.Add("税号", 150);
-            lv.Columns.Add("金额", 80, HorizontalAlignment.Right);
+            lv.Columns.Add("状态", 140);
+            lv.Columns.Add("发票号", 160);
+            lv.Columns.Add("发票金额", 85, HorizontalAlignment.Right);
             lv.Columns.Add("开票日期", 85);
-            lv.Columns.Add("原文件", 220);
-            lv.Columns.Add("整理后", 380);
+            lv.Columns.Add("抬头(购买方)", 200);
+            lv.Columns.Add("税号", 150);
+            lv.Columns.Add("原文件", 200);
+            lv.Columns.Add("整理后", 360);
             lv.ItemChecked += (s, e) => { if (suppress) return; var inv = e.Item.Tag as Invoice; if (inv != null) inv.Checked = e.Item.Checked; UpdateStatus(); };
             lv.DoubleClick += (s, e) => { if (lv.SelectedItems.Count > 0) { try { Process.Start(((Invoice)lv.SelectedItems[0].Tag).Path); } catch { } } };
             var menu = new ContextMenuStrip();
@@ -120,7 +123,7 @@ namespace PiaoMate
             lblStatus = new Label { AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font(Font, FontStyle.Bold) };
             bar = new ProgressBar { Dock = DockStyle.Fill, Visible = false };
             var bAll = new Button { Text = "全选/全不选", AutoSize = true };
-            btnRun = new Button { Text = "开始整理（复制）", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+            btnRun = new Button { Text = "开始整理", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
             btnDelete = new Button { Text = "删除原始文件…", AutoSize = true, Enabled = false, ForeColor = Color.Firebrick };
             bAll.Click += (s, e) => ToggleAll();
             btnRun.Click += (s, e) => RunOrganize();
@@ -166,7 +169,16 @@ namespace PiaoMate
                     if (d % 5 == 0 || d == files.Count) BeginInvoke((Action)(() => bar.Value = Math.Min(bar.Maximum, d)));
                 }));
                 invoices = bag.OrderBy(i => i.Ok ? 0 : 1).ThenBy(i => i.BuyerName).ThenBy(i => i.Date).ThenBy(i => i.FileName).ToList();
-                foreach (var i in invoices) i.Checked = i.Ok;
+                history.ReloadIfChanged();
+                var seenNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var i in invoices)
+                {
+                    if (!i.Ok) { i.Checked = false; continue; }
+                    bool conflict = history.FindExport(i) != null || history.FindImport(i) != null;
+                    string num = string.IsNullOrWhiteSpace(i.Number) ? "" : i.Number.Trim();
+                    if (!conflict && num.Length > 0 && !seenNums.Add(num)) conflict = true;
+                    i.Checked = !conflict;
+                }
                 lastResult = new List<OrganizeItem>();
                 btnDelete.Enabled = false;
             }
@@ -177,26 +189,51 @@ namespace PiaoMate
 
         void Fill(Dictionary<Invoice, OrganizeItem> res)
         {
+            history.ReloadIfChanged();
             suppress = true;
             lv.BeginUpdate(); lv.Items.Clear();
             string dst = txtDst.Text.Trim();
+            var seenNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var i in invoices)
             {
                 OrganizeItem r = null;
                 if (res != null) res.TryGetValue(i, out r);
+                HistoryRecord expRec = null, impRec = null;
+                bool dupInList = false;
+                if (r == null && i.Ok)
+                {
+                    expRec = history.FindExport(i);
+                    if (expRec == null) impRec = history.FindImport(i);
+                    string num = string.IsNullOrWhiteSpace(i.Number) ? "" : i.Number.Trim();
+                    if (expRec == null && impRec == null && num.Length > 0 && !seenNums.Add(num)) dupInList = true;
+                }
+                string statusText;
+                if (r != null) statusText = r.Status;
+                else if (!i.Ok) statusText = "无法识别";
+                else if (expRec != null) statusText = "已导出（拦截）";
+                else if (impRec != null) statusText = "已导入（重复）";
+                else if (dupInList) statusText = "发票号重复";
+                else statusText = "待整理";
+
                 var it = new ListViewItem("") { Tag = i, Checked = i.Checked };
-                it.SubItems.Add(r != null ? r.Status : (i.Ok ? "待整理" : "无法识别"));
-                it.SubItems.Add(i.Ok ? i.BuyerName : "");
-                it.SubItems.Add(i.BuyerTaxId);
+                it.SubItems.Add(statusText);
+                it.SubItems.Add(i.Ok ? i.Number : "");
                 it.SubItems.Add(i.Ok ? i.Amount.ToString("F2", CultureInfo.InvariantCulture) : "");
                 it.SubItems.Add(i.Date.HasValue ? i.Date.Value.ToString("yyyy-MM-dd") : "");
+                it.SubItems.Add(i.Ok ? i.BuyerName : "");
+                it.SubItems.Add(i.BuyerTaxId);
                 it.SubItems.Add(r != null ? r.Source : i.Path);
                 string target = r != null && r.Target.Length > 0 ? r.Target : (i.Ok ? Path.Combine(dst, Organizer.RelativeTarget(i)) : i.Error);
                 it.SubItems.Add(target);
-                it.ToolTipText = i.Summary() + (r != null && r.Target.Length > 0 ? "\n整理后：" + r.Target : "") + (r != null ? "\n状态：" + r.Status : "");
+                string tip = i.Summary() + (r != null && r.Target.Length > 0 ? "\n整理后：" + r.Target : "") + "\n状态：" + statusText;
+                if (expRec != null) tip += "\n导出时间：" + expRec.Time.ToString("yyyy-MM-dd HH:mm");
+                else if (impRec != null) tip += "\n导入时间：" + impRec.Time.ToString("yyyy-MM-dd HH:mm");
+                it.ToolTipText = tip;
                 if (!i.Ok) it.ForeColor = SystemColors.GrayText;
-                else if (r != null && r.Status.StartsWith("失败")) it.ForeColor = Color.Firebrick;
+                else if (r != null && (r.Status.StartsWith("失败") || r.Blocked)) it.ForeColor = Color.Firebrick;
                 else if (r != null && r.Verified) it.ForeColor = Color.DarkGreen;
+                else if (expRec != null) it.ForeColor = Color.Firebrick;
+                else if (impRec != null || dupInList) it.ForeColor = Color.DarkOrange;
                 lv.Items.Add(it);
             }
             lv.EndUpdate();
@@ -232,8 +269,17 @@ namespace PiaoMate
 
         void ToggleAll()
         {
-            bool v = invoices.Any(i => i.Ok && !i.Checked);
-            foreach (var i in invoices) i.Checked = v && i.Ok;
+            history.ReloadIfChanged();
+            bool anyUnchecked = invoices.Any(i => i.Ok && !i.Checked && history.FindExport(i) == null && history.FindImport(i) == null);
+            var seenNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var i in invoices)
+            {
+                if (!anyUnchecked || !i.Ok) { i.Checked = false; continue; }
+                bool conflict = history.FindExport(i) != null || history.FindImport(i) != null;
+                string num = string.IsNullOrWhiteSpace(i.Number) ? "" : i.Number.Trim();
+                if (!conflict && num.Length > 0 && !seenNums.Add(num)) conflict = true;
+                i.Checked = !conflict;
+            }
             Fill(lastResult.Count > 0 ? lastResult.ToDictionary(r => r.Invoice) : null);
         }
 
@@ -261,19 +307,74 @@ namespace PiaoMate
             Cursor = b ? Cursors.WaitCursor : Cursors.Default;
         }
 
+        /// <summary>决定是否自动删除原始文件（根据本年度记住的偏好，或首次弹窗询问）。</summary>
+        public static bool ShouldPromptAutoDelete(Settings settings, int currentYear)
+        {
+            return settings.AutoDeletePromptYear != currentYear;
+        }
+
+        bool AskAutoDelete(int count, int year, out bool remember)
+        {
+            remember = false;
+            using (var f = new Form
+            {
+                Text = "是否自动删除原始文件",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowIcon = false,
+                ShowInTaskbar = false,
+                StartPosition = FormStartPosition.CenterParent,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Font = Font,
+                Padding = new Padding(14)
+            })
+            {
+                var panel = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, Dock = DockStyle.Fill };
+                var lbl = new Label
+                {
+                    AutoSize = true,
+                    MaximumSize = new Size(440, 0),
+                    Margin = new Padding(0, 0, 0, 10),
+                    Text = "整理完成，已核对 " + count + " 个发票文件在目标目录中副本完全一致。\n\n是否自动将原位置的发票文件移入回收站？（必要时可从回收站恢复）"
+                };
+                var chk = new CheckBox
+                {
+                    AutoSize = true,
+                    Margin = new Padding(0, 0, 0, 12),
+                    Text = "记住我的选择，本年度（" + year + "年）不再提示"
+                };
+                var btns = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Dock = DockStyle.Fill };
+                var btnYes = new Button { Text = "是，移入回收站", AutoSize = true, DialogResult = DialogResult.Yes, Padding = new Padding(8, 3, 8, 3) };
+                var btnNo = new Button { Text = "否，保留原文件", AutoSize = true, DialogResult = DialogResult.No, Padding = new Padding(8, 3, 8, 3) };
+                btns.Controls.Add(btnNo);
+                btns.Controls.Add(btnYes);
+                panel.Controls.Add(lbl);
+                panel.Controls.Add(chk);
+                panel.Controls.Add(btns);
+                f.Controls.Add(panel);
+                f.AcceptButton = btnYes;
+                f.CancelButton = btnNo;
+                var dr = f.ShowDialog(this);
+                remember = chk.Checked;
+                return dr == DialogResult.Yes;
+            }
+        }
+
         async void RunOrganize()
         {
             var sel = invoices.Where(i => i.Checked && i.Ok).ToList();
             if (sel.Count == 0) { MessageBox.Show(this, "请先勾选要整理的发票。", Text); return; }
             string dst = txtDst.Text.Trim();
             if (dst.Length == 0) { MessageBox.Show(this, "请先设置「整理到」目录。", Text); return; }
-            if (MessageBox.Show(this, "将把 " + sel.Count + " 张发票按抬头分类【复制】到：\n" + dst + "\n\n原文件不会被改动。是否继续？", Text,
+            if (MessageBox.Show(this, "将把 " + sel.Count + " 张发票按抬头分类整理到：\n" + dst + "\n\n是否继续？", Text,
                 MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             SetBusy(true, "正在整理…");
             List<OrganizeItem> res = null;
             try
             {
-                res = await Task.Run(() => { var r = Organizer.Organize(sel, dst); Organizer.WriteIndex(r, DateTime.Now); return r; });
+                res = await Task.Run(() => { var r = Organizer.Organize(sel, dst, includeUnknown: false, history: history, historyNote: "整理"); Organizer.WriteIndex(r, DateTime.Now); return r; });
                 Changed = true;
             }
             catch (Exception ex) { MessageBox.Show(this, "整理失败：" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); }
@@ -281,10 +382,49 @@ namespace PiaoMate
             if (res == null) return;
             lastResult = res;
             Fill(res.ToDictionary(r => r.Invoice));
-            int ok = res.Count(r => r.Verified), failed = res.Count - ok;
-            btnDelete.Enabled = res.Any(r => r.Verified && !r.SourceDeleted && !r.Status.StartsWith("已在归档位置"));
-            string msg = "整理完成：" + ok + " 张已归档（其中 " + res.Count(r => r.Status == "已存在相同文件") + " 张此前已归档）" + (failed > 0 ? "，" + failed + " 张失败" : "") + "。\n\n" +
-                         "原始文件仍保留在原处。如需删除，请核对整理结果后点击「删除原始文件…」。\n\n是否打开整理目录？";
+
+            // 整理核对无误后，默认删除原位置的发票文件（移入回收站）；首次弹窗询问并可记住本年度不再提示
+            var cand = res.Where(r => r.Verified && !r.SourceDeleted && File.Exists(r.Source) &&
+                                      !string.Equals(Path.GetFullPath(r.Source), Path.GetFullPath(r.Target), StringComparison.OrdinalIgnoreCase)).ToList();
+            int deleted = 0;
+            if (cand.Count > 0)
+            {
+                int year = DateTime.Now.Year;
+                bool doDelete;
+                if (ShouldPromptAutoDelete(cfg, year))
+                {
+                    bool remember;
+                    doDelete = AskAutoDelete(cand.Count, year, out remember);
+                    if (remember)
+                    {
+                        cfg.AutoDeletePromptYear = year;
+                        cfg.AutoDeleteAfterOrganize = doDelete;
+                        cfg.Save();
+                    }
+                }
+                else
+                {
+                    doDelete = cfg.AutoDeleteAfterOrganize;
+                }
+                if (doDelete)
+                {
+                    Cursor = Cursors.WaitCursor;
+                    try { deleted = Organizer.DeleteSources(cand); }
+                    finally { Cursor = Cursors.Default; }
+                    Fill(res.ToDictionary(r => r.Invoice));
+                }
+            }
+
+            int ok = res.Count(r => r.Verified), blocked = res.Count(r => r.Blocked), failed = res.Count - ok - blocked;
+            btnDelete.Enabled = res.Any(r => r.Verified && !r.SourceDeleted && File.Exists(r.Source) &&
+                                             !string.Equals(Path.GetFullPath(r.Source), Path.GetFullPath(r.Target), StringComparison.OrdinalIgnoreCase));
+            string msg = "整理完成：" + ok + " 张已归档";
+            if (blocked > 0) msg += "，" + blocked + " 张已拦截（重复/已导出）";
+            if (failed > 0) msg += "，" + failed + " 张失败";
+            msg += "。";
+            if (deleted > 0) msg += "\n已将 " + deleted + " 个原始文件移入回收站。";
+            else if (btnDelete.Enabled) msg += "\n原始文件仍保留在原处，如需删除可点击「删除原始文件…」。";
+            msg += "\n\n是否打开整理目录？";
             if (MessageBox.Show(this, msg, Text, MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes) OpenDir(dst);
         }
 

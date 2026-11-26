@@ -3,13 +3,13 @@
   <ItemGroup>
     <PackageReference Include="PdfPig" Version="0.1.9" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
-    <Compile Include="..\..\src\DownloadForm.cs;..\..\src\ChangelogForm.cs;..\..\src\DisclaimerForm.cs;..\..\src\IssueForm.cs;..\..\src\ShellHelper.cs;..\..\src\FolderPicker.cs" />
+    <Compile Include="..\..\src\DownloadForm.cs;..\..\src\ChangelogForm.cs;..\..\src\DisclaimerForm.cs;..\..\src\IssueForm.cs;..\..\src\ShellHelper.cs;..\..\src\FolderPicker.cs;..\..\src\MainForm.cs;..\..\src\OrganizeForm.cs;..\..\src\HistoryForm.cs" />
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
     <Reference Include="Microsoft.VisualBasic" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Drawing" />
-    <Compile Include="..\..\src\InvoiceParser.cs;..\..\src\Matcher.cs;..\..\src\Exporter.cs;..\..\src\Settings.cs;..\..\src\Organizer.cs;..\..\src\Downloader.cs;..\..\src\SiteAdapters.cs" />
+    <Compile Include="..\..\src\InvoiceParser.cs;..\..\src\Matcher.cs;..\..\src\Exporter.cs;..\..\src\Settings.cs;..\..\src\Organizer.cs;..\..\src\Downloader.cs;..\..\src\SiteAdapters.cs;..\..\src\InvoiceHistory.cs" />
     <EmbeddedResource Include="..\..\docs\免责声明.md" LogicalName="免责声明.md" />
   </ItemGroup>
 </Project>

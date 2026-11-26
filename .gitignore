@@ -5,8 +5,10 @@ obj/
 .vs/
 *.user
 
-# 用户配置（含个人目录、手机号、邮箱）
+# 用户配置与历史记录（含个人目录、手机号、邮箱、发票号）
 PiaoMate.config
+PiaoMate.history.tsv
+PiaoMate.history.tsv.tmp
 
 # 内部版内置公司信息（只提交示例）
 internal/*

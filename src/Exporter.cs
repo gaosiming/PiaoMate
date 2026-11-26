@@ -42,7 +42,7 @@ namespace PiaoMate
                 n++;
                 total += inv.Amount;
                 sb.AppendLine(n + ". 文件名：" + Path.GetFileName(target));
-                sb.AppendLine("   抬头：" + inv.BuyerName + "    税号：" + inv.BuyerTaxId + "    金额：" + inv.Amount.ToString("F2", CultureInfo.InvariantCulture) + " 元");
+                sb.AppendLine("   抬头：" + inv.BuyerName + "    税号：" + inv.BuyerTaxId + "    金额：" + inv.Amount.ToString("F2", CultureInfo.InvariantCulture) + " 元" + (inv.Number.Length > 0 ? "    发票号：" + inv.Number : ""));
                 sb.AppendLine();
             }
             sb.AppendLine(new string('=', 60));

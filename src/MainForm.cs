@@ -16,10 +16,11 @@ namespace PiaoMate
     {
 
         readonly Settings cfg;
+        readonly InvoiceHistory history;
         readonly List<Invoice> all = new List<Invoice>();
         readonly List<Invoice> shown = new List<Invoice>();
         bool suppress;
-        int sortCol = 1; bool sortAsc = true;
+        int sortCol = 3; bool sortAsc = true;
 
         Label lblCName, lblCTax;
         Action fitFilter;
@@ -34,8 +35,11 @@ namespace PiaoMate
         ProgressBar bar;
         CancellationTokenSource scanCts;
 
-        public MainForm()
+        public MainForm() : this(InvoiceHistory.Default) { }
+
+        public MainForm(InvoiceHistory history)
         {
+            this.history = history ?? InvoiceHistory.Default;
             cfg = Settings.Load();
             Text = "票小秘 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString(3) + (Settings.IsInternalEdition ? "（内部版）" : "");
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -64,17 +68,21 @@ namespace PiaoMate
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Controls.Add(root);
 
-            // 功能入口：整理发票 / 下载发票（独立窗口）
+            // 功能入口：整理发票 / 下载发票 / 导入导出记录（独立窗口）
             var tools = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(6, 2, 6, 2) };
             var tbOrganize = new ToolStripButton("整理发票") { ToolTipText = "按 抬头_税号 分类整理发票目录中的 PDF" };
             var tbDownload = new ToolStripButton("下载发票") { ToolTipText = "通过链接 / 二维码截图下载发票，并自动整理" };
-            tbOrganize.Click += (s, e) => OpenTool(new OrganizeForm(cfg, txtDir.Text.Trim()));
-            tbDownload.Click += (s, e) => OpenTool(new DownloadForm(cfg));
+            var tbHistory = new ToolStripButton("导入导出记录") { ToolTipText = "查看最近 14 个月的发票导入与导出记录" };
+            tbOrganize.Click += (s, e) => OpenTool(new OrganizeForm(cfg, txtDir.Text.Trim(), history));
+            tbDownload.Click += (s, e) => OpenTool(new DownloadForm(cfg, history));
+            tbHistory.Click += (s, e) => { using (var hf = new HistoryForm(history)) hf.ShowDialog(this); };
             tools.Items.Add(new ToolStripLabel("凑金额导出（本页）"));
             tools.Items.Add(new ToolStripSeparator());
             tools.Items.Add(tbOrganize);
             tools.Items.Add(new ToolStripSeparator());
             tools.Items.Add(tbDownload);
+            tools.Items.Add(new ToolStripSeparator());
+            tools.Items.Add(tbHistory);
             var tbLog = new ToolStripButton("更新日志") { Alignment = ToolStripItemAlignment.Right, ToolTipText = "查看各版本的改动记录" };
             tbLog.Click += (s, e) => ChangelogForm.ShowLog(this);
             tools.Items.Add(tbLog);
@@ -154,14 +162,22 @@ namespace PiaoMate
             txtTarget.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { MatchNow(); e.SuppressKeyPress = true; } };
 
             // 列表
-            lv = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, CheckBoxes = true, HideSelection = false, Scrollable = true, ShowItemToolTips = true };
-            lv.Columns.Add("", 24);
-            lv.Columns.Add("开票日期", 85);
-            lv.Columns.Add("公司抬头(购买方)", 230);
-            lv.Columns.Add("税号", 150);
-            lv.Columns.Add("项目名称", 200);
-            lv.Columns.Add("价税合计", 90, HorizontalAlignment.Right);
-            lv.Columns.Add("文件名 / 状态", 330);
+            lv = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, CheckBoxes = true, HideSelection = false, Scrollable = true, ShowItemToolTips = true, AllowColumnReorder = true };
+            lv.Columns.Add(new ColumnHeader { Name = "chk", Text = "", Width = 24 });
+            lv.Columns.Add(new ColumnHeader { Name = "number", Text = "发票号", Width = 165 });
+            lv.Columns.Add(new ColumnHeader { Name = "amount", Text = "发票金额", Width = 90, TextAlign = HorizontalAlignment.Right });
+            lv.Columns.Add(new ColumnHeader { Name = "date", Text = "开票日期", Width = 85 });
+            lv.Columns.Add(new ColumnHeader { Name = "buyer", Text = "公司抬头(购买方)", Width = 210 });
+            lv.Columns.Add(new ColumnHeader { Name = "tax", Text = "税号", Width = 150 });
+            lv.Columns.Add(new ColumnHeader { Name = "dir", Text = "所在目录", Width = 180 });
+            lv.Columns.Add(new ColumnHeader { Name = "item", Text = "项目名称", Width = 180 });
+            lv.Columns.Add(new ColumnHeader { Name = "file", Text = "文件名 / 状态", Width = 280 });
+            ApplyColumnOrder(lv, cfg.MainColOrder);
+            lv.ColumnReordered += (s, e) =>
+            {
+                if (e.OldDisplayIndex == 0 || e.NewDisplayIndex == 0) { e.Cancel = true; return; }
+                BeginInvoke((Action)(() => { cfg.MainColOrder = GetColumnOrder(lv); }));
+            };
             lv.ItemChecked += (s, e) => { if (suppress) return; var inv = e.Item.Tag as Invoice; if (inv != null) inv.Checked = e.Item.Checked; UpdateStatus(); };
             lv.ColumnClick += (s, e) => { if (e.Column == 0) return; if (sortCol == e.Column) sortAsc = !sortAsc; else { sortCol = e.Column; sortAsc = true; } Refilter(); };
             lv.DoubleClick += (s, e) => { if (lv.SelectedItems.Count > 0) { var inv = (Invoice)lv.SelectedItems[0].Tag; try { Process.Start(inv.Path); } catch { } } };
@@ -244,6 +260,37 @@ namespace PiaoMate
             int sc = cmbCompany.SelectedIndex;
             cfg.CompanyChoice = sc <= 0 ? "" : (sc > cfg.Companies.Count ? "custom" : cfg.Companies[sc - 1].Value); if (prevCustom) { cfg.CustomName = txtCName.Text.Trim(); cfg.CustomTaxId = txtCTax.Text.Trim(); }
             cfg.Target = txtTarget.Text.Trim();
+            if (lv != null && lv.Columns.Count > 1) cfg.MainColOrder = GetColumnOrder(lv);
+        }
+
+        /// <summary>获取列表当前列显示顺序（不含第 0 勾选列），用逗号分隔列名。</summary>
+        public static string GetColumnOrder(ListView listView)
+        {
+            return string.Join(",", listView.Columns.Cast<ColumnHeader>()
+                .Where(c => c.Index > 0)
+                .OrderBy(c => c.DisplayIndex)
+                .Select(c => c.Name));
+        }
+
+        /// <summary>按保存的列名顺序恢复 ListView 列显示顺序（第 0 勾选列始终固定在首位）。</summary>
+        public static void ApplyColumnOrder(ListView listView, string order)
+        {
+            if (listView == null || listView.Columns.Count <= 1 || string.IsNullOrWhiteSpace(order)) return;
+            var byName = new Dictionary<string, ColumnHeader>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 1; i < listView.Columns.Count; i++)
+                if (!string.IsNullOrEmpty(listView.Columns[i].Name)) byName[listView.Columns[i].Name] = listView.Columns[i];
+            var ordered = new List<ColumnHeader>();
+            var used = new HashSet<ColumnHeader>();
+            foreach (var raw in order.Split(','))
+            {
+                string k = raw.Trim();
+                ColumnHeader col;
+                if (k.Length > 0 && byName.TryGetValue(k, out col) && used.Add(col)) ordered.Add(col);
+            }
+            for (int i = 1; i < listView.Columns.Count; i++)
+                if (used.Add(listView.Columns[i])) ordered.Add(listView.Columns[i]);
+            listView.Columns[0].DisplayIndex = 0;
+            for (int i = 0; i < ordered.Count; i++) ordered[i].DisplayIndex = i + 1;
         }
 
         /// <summary>公司名/税号框：自定义时可编辑；备选公司显示其名称税号(只读)；不筛选时为空(只读)。</summary>
@@ -351,37 +398,65 @@ namespace PiaoMate
 
         void Refilter()
         {
+            history.ReloadIfChanged();
             suppress = true;
             lv.BeginUpdate();
             lv.Items.Clear();
             shown.Clear();
             var rows = new List<Invoice>(all.Where(i => Pass(i)));
             rows.Sort(Compare);
+            var numCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var i in all)
+            {
+                if (!i.Ok || string.IsNullOrWhiteSpace(i.Number)) continue;
+                string k = i.Number.Trim();
+                int cnt; numCounts.TryGetValue(k, out cnt); numCounts[k] = cnt + 1;
+            }
             // 无法识别的放最后（灰色）
             var bad = all.Where(i => !i.Ok).OrderBy(i => i.FileName).ToList();
-            foreach (var i in rows) { shown.Add(i); lv.Items.Add(MakeItem(i)); }
-            foreach (var i in bad) lv.Items.Add(MakeItem(i));
+            foreach (var i in rows)
+            {
+                var expRec = history.FindExport(i);
+                int cnt = 0;
+                if (!string.IsNullOrWhiteSpace(i.Number)) numCounts.TryGetValue(i.Number.Trim(), out cnt);
+                shown.Add(i);
+                lv.Items.Add(MakeItem(i, expRec, cnt > 1));
+            }
+            foreach (var i in bad) lv.Items.Add(MakeItem(i, null, false));
             lv.EndUpdate();
             suppress = false;
             UpdateStatus();
         }
 
-        ListViewItem MakeItem(Invoice i)
+        ListViewItem MakeItem(Invoice i, HistoryRecord expRec, bool dupInList)
         {
             var it = new ListViewItem("");
             it.Tag = i;
+            string dir = "";
+            try { dir = Path.GetDirectoryName(i.Path) ?? ""; } catch { }
             if (i.Ok)
             {
-                it.SubItems.Add(i.Date.HasValue ? i.Date.Value.ToString("yyyy-MM-dd") : "");
-                it.SubItems.Add(i.BuyerName); it.SubItems.Add(i.BuyerTaxId); it.SubItems.Add(i.Item);
+                it.SubItems.Add(i.Number);
                 it.SubItems.Add(i.Amount.ToString("F2", CultureInfo.InvariantCulture));
-                it.SubItems.Add(i.FileName);
-                it.ToolTipText = i.Summary();
+                it.SubItems.Add(i.Date.HasValue ? i.Date.Value.ToString("yyyy-MM-dd") : "");
+                it.SubItems.Add(i.BuyerName);
+                it.SubItems.Add(i.BuyerTaxId);
+                it.SubItems.Add(dir);
+                it.SubItems.Add(i.Item);
+                string fileStatus = i.FileName;
+                if (expRec != null) { fileStatus += " 【已导出 " + expRec.Time.ToString("yyyy-MM-dd") + "】"; it.ForeColor = Color.Firebrick; }
+                else if (dupInList) { fileStatus += " 【发票号重复】"; it.ForeColor = Color.DarkOrange; }
+                it.SubItems.Add(fileStatus);
+                string tip = i.Summary();
+                if (expRec != null) tip += "\n[拦截提示] 该发票已于 " + expRec.Time.ToString("yyyy-MM-dd HH:mm") + " 导出过" + (expRec.Note.Length > 0 ? "（" + expRec.Note + "）" : "") + "，不可重复导出。";
+                else if (dupInList) tip += "\n[提示] 列表中存在相同发票号的重复文件。";
+                it.ToolTipText = tip;
                 it.Checked = i.Checked;
             }
             else
             {
-                it.SubItems.Add(""); it.SubItems.Add("（无法识别）"); it.SubItems.Add(""); it.SubItems.Add(""); it.SubItems.Add("");
+                it.SubItems.Add(""); it.SubItems.Add(""); it.SubItems.Add(""); it.SubItems.Add("（无法识别）");
+                it.SubItems.Add(""); it.SubItems.Add(dir); it.SubItems.Add("");
                 it.SubItems.Add(i.FileName + " — " + i.Error);
                 it.ForeColor = SystemColors.GrayText;
                 it.ToolTipText = i.Summary();
@@ -394,11 +469,13 @@ namespace PiaoMate
             int c;
             switch (sortCol)
             {
-                case 1: c = Nullable.Compare(a.Date, b.Date); break;
-                case 2: c = string.Compare(a.BuyerName, b.BuyerName, StringComparison.CurrentCulture); break;
-                case 3: c = string.CompareOrdinal(a.BuyerTaxId, b.BuyerTaxId); break;
-                case 4: c = string.Compare(a.Item, b.Item, StringComparison.CurrentCulture); break;
-                case 5: c = a.Amount.CompareTo(b.Amount); break;
+                case 1: c = string.CompareOrdinal(a.Number, b.Number); break;
+                case 2: c = a.Amount.CompareTo(b.Amount); break;
+                case 3: c = Nullable.Compare(a.Date, b.Date); break;
+                case 4: c = string.Compare(a.BuyerName, b.BuyerName, StringComparison.CurrentCulture); break;
+                case 5: c = string.CompareOrdinal(a.BuyerTaxId, b.BuyerTaxId); break;
+                case 6: c = string.Compare(Path.GetDirectoryName(a.Path) ?? "", Path.GetDirectoryName(b.Path) ?? "", StringComparison.CurrentCultureIgnoreCase); break;
+                case 7: c = string.Compare(a.Item, b.Item, StringComparison.CurrentCulture); break;
                 default: c = string.Compare(a.FileName, b.FileName, StringComparison.CurrentCulture); break;
             }
             if (c == 0) c = string.Compare(a.FileName, b.FileName, StringComparison.CurrentCulture);
@@ -433,10 +510,43 @@ namespace PiaoMate
 
         void SetAll(bool v)
         {
+            history.ReloadIfChanged();
+            var seenNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             suppress = true;
-            foreach (ListViewItem it in lv.Items) { var inv = (Invoice)it.Tag; if (inv.Ok) { inv.Checked = v; it.Checked = v; } }
+            foreach (ListViewItem it in lv.Items)
+            {
+                var inv = (Invoice)it.Tag;
+                if (!inv.Ok) continue;
+                bool check = v;
+                if (v)
+                {
+                    if (history.FindExport(inv) != null) check = false;
+                    else if (!string.IsNullOrWhiteSpace(inv.Number) && !seenNums.Add(inv.Number.Trim())) check = false;
+                }
+                inv.Checked = check; it.Checked = check;
+            }
             suppress = false;
             UpdateStatus();
+        }
+
+        /// <summary>过滤出可用于凑金额匹配的候选发票：剔除已导出记录，并对同发票号去重。</summary>
+        public static List<Invoice> FilterMatchCandidates(IList<Invoice> source, InvoiceHistory hist, out int skippedExported, out int skippedDup)
+        {
+            skippedExported = 0; skippedDup = 0;
+            var result = new List<Invoice>();
+            var seenNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var inv in source)
+            {
+                if (!inv.Ok) continue;
+                string hash = InvoiceHistory.FallbackHash(inv);
+                if (hist != null && hist.FindExport(inv, hash) != null) { skippedExported++; continue; }
+                string num = string.IsNullOrWhiteSpace(inv.Number) ? "" : inv.Number.Trim();
+                if ((num.Length > 0 && !seenNums.Add(num)) || (hash.Length > 0 && !seenHashes.Add(hash)))
+                { skippedDup++; continue; }
+                result.Add(inv);
+            }
+            return result;
         }
 
         // ---------- 匹配 ----------
@@ -445,11 +555,19 @@ namespace PiaoMate
             long target;
             if (!TryTarget(out target)) { MessageBox.Show(this, "请输入大于 0 的目标金额，例如 1234.56", Text); txtTarget.Focus(); return; }
             if (shown.Count == 0) { MessageBox.Show(this, "当前列表没有可选发票。", Text); return; }
+            history.ReloadIfChanged();
+            int skippedExp, skippedDup;
+            var candidates = FilterMatchCandidates(shown, history, out skippedExp, out skippedDup);
+            if (candidates.Count == 0)
+            {
+                MessageBox.Show(this, "当前列表中没有未导出的可用发票（" + skippedExp + " 张已有导出记录）。", Text);
+                return;
+            }
             Cursor = Cursors.WaitCursor;
             List<int> pick;
-            try { pick = Matcher.Find(shown.Select(i => i.Cents).ToList(), target); }
+            try { pick = Matcher.Find(candidates.Select(i => i.Cents).ToList(), target); }
             finally { Cursor = Cursors.Default; }
-            var set = new HashSet<Invoice>(pick.Select(i => shown[i]));
+            var set = new HashSet<Invoice>(pick.Select(i => candidates[i]));
             suppress = true;
             foreach (ListViewItem it in lv.Items)
             {
@@ -459,8 +577,15 @@ namespace PiaoMate
             }
             suppress = false;
             UpdateStatus();
+            if (skippedExp > 0 || skippedDup > 0)
+            {
+                var notes = new List<string>();
+                if (skippedExp > 0) notes.Add("已排除 " + skippedExp + " 张已导出发票");
+                if (skippedDup > 0) notes.Add("去重 " + skippedDup + " 张重复发票号");
+                lblStatus.Text += "    （" + string.Join("，", notes) + "）";
+            }
             if (pick.Count == 0)
-                MessageBox.Show(this, "当前列表中全部发票合计 " + (shown.Where(i => i.Cents > 0).Sum(i => i.Cents) / 100m).ToString("F2", CultureInfo.InvariantCulture) + " 元，不足目标金额 " + (target / 100m).ToString("F2", CultureInfo.InvariantCulture) + " 元，无法凑够。", Text);
+                MessageBox.Show(this, "当前列表中可用发票合计 " + (candidates.Where(i => i.Cents > 0).Sum(i => i.Cents) / 100m).ToString("F2", CultureInfo.InvariantCulture) + " 元，不足目标金额 " + (target / 100m).ToString("F2", CultureInfo.InvariantCulture) + " 元，无法凑够。", Text);
         }
 
         // ---------- 导出 ----------
@@ -470,13 +595,73 @@ namespace PiaoMate
             if (sel.Count == 0) { MessageBox.Show(this, "请先勾选要导出的发票。", Text); return; }
             string outDir = txtOut.Text.Trim();
             if (outDir.Length == 0) { MessageBox.Show(this, "请先设置导出目录。", Text); return; }
+
+            history.ReloadIfChanged();
+            // 1. 拦截已有导出记录的发票
+            var exportedConflicts = new List<string>();
+            var exportedInvs = new HashSet<Invoice>();
+            foreach (var inv in sel)
+            {
+                var rec = history.FindExport(inv);
+                if (rec != null)
+                {
+                    exportedInvs.Add(inv);
+                    exportedConflicts.Add("  · " + (inv.Number.Length > 0 ? inv.Number : inv.FileName) + "（金额 " + inv.Amount.ToString("F2", CultureInfo.InvariantCulture) + "，已于 " + rec.Time.ToString("yyyy-MM-dd") + " 导出）");
+                }
+            }
+            if (exportedConflicts.Count > 0)
+            {
+                // 自动取消勾选冲突发票，避免误导出
+                suppress = true;
+                foreach (ListViewItem it in lv.Items)
+                {
+                    var inv = it.Tag as Invoice;
+                    if (inv != null && exportedInvs.Contains(inv)) { inv.Checked = false; it.Checked = false; }
+                }
+                suppress = false;
+                UpdateStatus();
+                string preview = string.Join("\n", exportedConflicts.Take(10)) + (exportedConflicts.Count > 10 ? "\n  ……等共 " + exportedConflicts.Count + " 张" : "");
+                MessageBox.Show(this, "以下发票在导出记录中已存在，已拦截并取消勾选，避免重复导出：\n\n" + preview, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 2. 拦截本次勾选中的重复发票号
+            var dupGroups = sel.Select(i => new { Invoice = i, Key = string.IsNullOrWhiteSpace(i.Number)
+                                                   ? InvoiceHistory.FallbackHash(i) : i.Number.Trim() })
+                               .Where(i => i.Key.Length > 0)
+                               .GroupBy(i => i.Key, StringComparer.OrdinalIgnoreCase)
+                               .Where(g => g.Count() > 1).ToList();
+            if (dupGroups.Count > 0)
+            {
+                string preview = string.Join("\n", dupGroups.Take(10).Select(g => "  · " +
+                    (string.IsNullOrWhiteSpace(g.First().Invoice.Number) ? g.First().Invoice.FileName : "发票号 " + g.Key) +
+                    "（勾选了 " + g.Count() + " 份）"));
+                MessageBox.Show(this, "所选发票中存在重复项，请取消重复项后再导出：\n\n" + preview, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             decimal sum = sel.Sum(i => i.Amount);
             if (MessageBox.Show(this, "将把 " + sel.Count + " 张发票（合计 " + sum.ToString("F2", CultureInfo.InvariantCulture) + " 元）移动到导出目录，是否继续？",
                 Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             try
             {
                 Directory.CreateDirectory(outDir);
-                string dest = Exporter.Export(sel, outDir, DateTime.Now);
+                DateTime now = DateTime.Now;
+                var originalPaths = sel.ToDictionary(i => i, i => i.Path);
+                string dest;
+                lock (history.SyncRoot)
+                {
+                    history.ReloadIfChanged();
+                    if (sel.Any(i => history.FindExport(i) != null))
+                        throw new InvalidOperationException("所选发票已有导出记录，请重新选择。");
+                    try { dest = Exporter.Export(sel, outDir, now); }
+                    finally
+                    {
+                        var moved = sel.Where(i => i.Path != originalPaths[i]).ToList();
+                        if (moved.Count > 0)
+                            history.RecordExport(moved, Path.GetFileName(Path.GetDirectoryName(moved[0].Path)), now);
+                    }
+                }
                 foreach (var i in sel) all.Remove(i);
                 SaveFromUi(); cfg.Save();
                 Refilter();
