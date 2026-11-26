@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Windows.Forms;
 using PiaoMate;
 
 static class T
@@ -120,6 +121,7 @@ static class T
         File.Delete(cp);
 
         ColumnOrderTests();
+        DialogLayoutTests();
         HistoryAndDedupTests(f1, f2);
         OrganizerTests(f1, f2);
         DownloadListUiTests(f1);
@@ -495,6 +497,50 @@ static class T
         Eq(0, lv.Columns[0].DisplayIndex, "勾选列固定首位");
         Eq("date,number,amount,buyer,tax,dir,item,file", MainForm.GetColumnOrder(lv), "恢复列顺序并补齐剩余列");
         lv.Dispose();
+    }
+
+    static void DialogLayoutTests()
+    {
+        string historyPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "history.tsv");
+        var history = new InvoiceHistory(historyPath);
+        var settings = new Settings { ArchiveDir = new string('a', 300) };
+        using (var organize = new OrganizeForm(settings, "", history))
+        using (var download = new DownloadForm(settings, history))
+        using (var records = new HistoryForm(history))
+        {
+            foreach (var form in new Form[] { organize, download, records })
+            {
+                var handle = form.Handle;
+                var root = (TableLayoutPanel)form.Controls[0];
+                var table = (TableLayoutPanel)root.GetControlFromPosition(0, 0);
+                var input = table.Controls.OfType<TextBox>().First();
+                var list = root.Controls.OfType<ListView>().Single();
+                input.Text = new string('a', 300);
+                var status = form == organize
+                    ? root.GetControlFromPosition(0, 3).Controls.OfType<Label>().Single()
+                    : root.Controls.OfType<Label>().Last();
+                status.Text = new string('字', 300);
+                int inputWidth = input.Width, listWidth = list.Width;
+                form.Width = form.MinimumSize.Width;
+                Eq(true, input.Width > 0 && input.Width < inputWidth, form.Text + "输入框随窗口收缩");
+                Eq(true, list.Width < listWidth, form.Text + "列表随窗口收缩");
+                foreach (Control row in root.Controls)
+                {
+                    Eq(true, root.ClientRectangle.Contains(row.Bounds), form.Text + "行位于窗口内");
+                    foreach (Control control in row.Controls)
+                    {
+                        if (control is Button || control is CheckBox)
+                            Eq(true, row.ClientRectangle.Contains(control.Bounds), form.Text + "操作可见：" + control.Text);
+                    }
+                }
+                if (form == download)
+                {
+                    var actions = root.Controls.OfType<FlowLayoutPanel>().Single();
+                    Eq(true, actions.Controls.Cast<Control>().Select(button => button.Top).Distinct().Count() > 1,
+                        "下载发票操作按钮在窄窗口换行");
+                }
+            }
+        }
     }
 
     /// <summary>导入导出记录、14个月保留期、性能与去重拦截。</summary>

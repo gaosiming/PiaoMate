@@ -69,6 +69,7 @@ namespace PiaoMate
         void BuildUi()
         {
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(8) };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
@@ -90,11 +91,16 @@ namespace PiaoMate
             t.Controls.Add(L("整理到："), 0, 0); t.Controls.Add(txtDst, 1, 0); t.Controls.Add(b1, 2, 0); t.Controls.Add(b2, 3, 0);
             root.Controls.Add(t, 0, 0);
 
-            root.Controls.Add(new Label
+            var help = new Label
             {
                 AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(3, 2, 3, 4),
                 Text = "在下框输入发票链接（每行一个）；也可按 Ctrl+V 粘贴二维码截图或图片链接，或把二维码图片 / 已下载的 PDF 拖入本窗口。下载后自动按抬头整理。"
-            }, 0, 1);
+            };
+            root.Controls.Add(help, 0, 1);
+            void FitHelp() => help.MaximumSize =
+                new Size(Math.Max(1, root.DisplayRectangle.Width - help.Margin.Horizontal), 0);
+            root.SizeChanged += (s, e) => FitHelp();
+            FitHelp();
 
             txtUrls = new TextBox { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true };
             root.Controls.Add(txtUrls, 0, 2);
@@ -158,7 +164,7 @@ namespace PiaoMate
             lv.ContextMenuStrip = menu;
             root.Controls.Add(lv, 0, 4);
 
-            lblStatus = new Label { AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(3, 6, 3, 3) };
+            lblStatus = new Label { Dock = DockStyle.Fill, AutoEllipsis = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(3, 6, 3, 3) };
             root.Controls.Add(lblStatus, 0, 5);
         }
 

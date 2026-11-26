@@ -57,6 +57,7 @@ namespace PiaoMate
         void BuildUi()
         {
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(8) };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -83,11 +84,16 @@ namespace PiaoMate
             t.Controls.Add(L("整理到："), 0, 1); t.Controls.Add(txtDst, 1, 1); t.Controls.Add(b2, 2, 1); t.Controls.Add(bOpen, 3, 1);
             root.Controls.Add(t, 0, 0);
 
-            root.Controls.Add(new Label
+            var help = new Label
             {
                 AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(3, 2, 3, 6),
                 Text = "按「抬头_税号」建子文件夹，文件命名为「金额_抬头_税号_发票号_开票日期.pdf」。整理核对无误后默认将原文件移入回收站（首次弹窗确认，可记住本年度不再提示）；已有导入/导出记录的发票会自动拦截。"
-            }, 0, 1);
+            };
+            root.Controls.Add(help, 0, 1);
+            void FitHelp() => help.MaximumSize =
+                new Size(Math.Max(1, root.DisplayRectangle.Width - help.Margin.Horizontal), 0);
+            root.SizeChanged += (s, e) => FitHelp();
+            FitHelp();
 
             lv = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, CheckBoxes = true, HideSelection = false, ShowItemToolTips = true };
             lv.Columns.Add("", 24);
@@ -120,7 +126,7 @@ namespace PiaoMate
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
             for (int i = 0; i < 3; i++) bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            lblStatus = new Label { AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font(Font, FontStyle.Bold) };
+            lblStatus = new Label { AutoEllipsis = true, Anchor = AnchorStyles.Left | AnchorStyles.Right, Font = new Font(Font, FontStyle.Bold) };
             bar = new ProgressBar { Dock = DockStyle.Fill, Visible = false };
             var bAll = new Button { Text = "全选/全不选", AutoSize = true };
             btnRun = new Button { Text = "开始整理", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };

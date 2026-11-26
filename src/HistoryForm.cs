@@ -34,17 +34,23 @@ namespace PiaoMate
         void BuildUi()
         {
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(8) };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Controls.Add(root);
 
-            var top = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+            var top = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 5, RowCount = 1 };
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             cmbType = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
             cmbType.Items.AddRange(new object[] { "全部", "导出", "导入/整理" });
             cmbType.SelectedIndex = 0;
             cmbType.SelectedIndexChanged += (s, e) => RefreshList();
-            txtSearch = new TextBox { Width = 260 };
+            txtSearch = new TextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
             txtSearch.TextChanged += (s, e) => RefreshList();
             var btnRefresh = new Button { Text = "刷新", AutoSize = true };
             btnRefresh.Click += (s, e) => Reload();
@@ -74,7 +80,7 @@ namespace PiaoMate
             lv.ContextMenuStrip = menu;
             root.Controls.Add(lv, 0, 1);
 
-            lblStatus = new Label { AutoSize = true, Margin = new Padding(3, 6, 3, 3), ForeColor = SystemColors.GrayText };
+            lblStatus = new Label { Dock = DockStyle.Fill, AutoEllipsis = true, Margin = new Padding(3, 6, 3, 3), ForeColor = SystemColors.GrayText };
             root.Controls.Add(lblStatus, 0, 2);
         }
 
